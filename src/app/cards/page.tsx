@@ -487,19 +487,31 @@ export default function CardsPage() {
           </div>
 
           <div className="table-wrap hidden md:block">
-            <table className="min-w-[1230px] lg:min-w-[1320px]">
+            <table className="w-full table-fixed">
+              <colgroup>
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "8%" }} />
+              </colgroup>
               <thead>
                 <tr>
-                  <th className="min-w-[126px]">Card</th>
-                  <th className="min-w-[114px]">Limit</th>
-                  <th className="min-w-[114px]">Used</th>
-                  <th className="min-w-[106px]">APR %</th>
-                  <th className="min-w-[108px]">Due Day</th>
-                  <th className="min-w-[190px]">Next Due</th>
-                  <th className="min-w-[116px]">Available</th>
-                  <th className="min-w-[132px]">Interest ({month || "month"})</th>
-                  <th className="min-w-[172px]">Projected Used ({month || "month"})</th>
-                  <th className="min-w-[96px]">Action</th>
+                  <th>Card</th>
+                  <th>Limit</th>
+                  <th>Used</th>
+                  <th>APR %</th>
+                  <th>Due Day</th>
+                  <th>Next Due</th>
+                  <th>Available</th>
+                  <th>Interest ({month || "month"})</th>
+                  <th>Projected Used ({month || "month"})</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -518,7 +530,7 @@ export default function CardsPage() {
                       <td>{card.name}</td>
                       <td>
                         <input
-                          className="input min-w-[96px]"
+                          className="input w-full"
                           type="number"
                           step="0.01"
                           value={draft.limit}
@@ -532,7 +544,7 @@ export default function CardsPage() {
                       </td>
                       <td>
                         <input
-                          className="input min-w-[96px]"
+                          className="input w-full"
                           type="number"
                           step="0.01"
                           value={draft.usedLimit}
@@ -546,7 +558,7 @@ export default function CardsPage() {
                       </td>
                       <td>
                         <input
-                          className="input min-w-[92px]"
+                          className="input w-full"
                           type="number"
                           step="0.01"
                           value={draft.interestRateApr}
@@ -560,7 +572,7 @@ export default function CardsPage() {
                       </td>
                       <td>
                         <select
-                          className="input min-w-[96px]"
+                          className="input w-full"
                           value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
                           onChange={(event) =>
                             setCardDrafts((prev) => ({

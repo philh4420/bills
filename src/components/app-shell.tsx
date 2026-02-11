@@ -20,8 +20,8 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)] text-[var(--ink-main)]">
-      <div className="mx-auto flex w-full max-w-[1400px] gap-4 px-3 py-3 md:px-6 md:py-6">
-        <aside className="panel sticky top-6 hidden h-fit w-64 shrink-0 p-4 lg:block">
+      <div className="mx-auto flex w-full max-w-[1880px] gap-3 px-2 py-3 sm:px-3 md:gap-4 md:px-4 md:py-5 lg:px-5 xl:px-6">
+        <aside className="panel sticky top-6 hidden h-fit w-64 shrink-0 p-4 2xl:block">
           <p className="text-[0.62rem] uppercase tracking-[0.24em] text-[var(--ink-soft)]">Bills App v1</p>
           <h1 className="mt-2 text-xl font-semibold text-[var(--ink-main)]">Household Console</h1>
           <p className="mt-2 text-sm text-[var(--ink-soft)]">Owner workspace for cards, bills, imports, and purchases.</p>
@@ -75,7 +75,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
             </nav>
           </header>
 
-          <main className="pt-4 md:pt-5">{children}</main>
+          <main className="pt-3 md:pt-4">{children}</main>
         </div>
       </div>
     </div>
