@@ -8,6 +8,7 @@ import {
   LoanedOutItem,
   MonthlyAdjustment,
   MonthlyCardPayments,
+  MonthlyIncomePaydays,
   MonthSnapshot
 } from "@/types";
 
@@ -195,6 +196,23 @@ function isLoanPaidBackByMonth(
   return loan.status === "paidBack" && Boolean(loan.paidBackMonth && loan.paidBackMonth <= month);
 }
 
+function incomeTotalForMonth(
+  month: string,
+  incomeItems: LineItem[],
+  incomePaydays: MonthlyIncomePaydays[]
+): number {
+  const overrideByIncomeId =
+    incomePaydays.find((entry) => entry.month === month)?.byIncomeId || {};
+
+  return normalizeCurrency(
+    incomeItems.reduce((acc, item) => {
+      const paydays = overrideByIncomeId[item.id];
+      const count = Array.isArray(paydays) && paydays.length > 0 ? paydays.length : 1;
+      return acc + item.amount * count;
+    }, 0)
+  );
+}
+
 export function computeMonthSnapshots(params: {
   cards: CardAccount[];
   monthlyPayments: MonthlyCardPayments[];
@@ -203,6 +221,7 @@ export function computeMonthSnapshots(params: {
   shopping: LineItem[];
   myBills: LineItem[];
   adjustments: MonthlyAdjustment[];
+  incomePaydays: MonthlyIncomePaydays[];
   loanedOutItems: LoanedOutItem[];
   baseBankBalance: number;
 }): MonthSnapshot[] {
@@ -214,12 +233,12 @@ export function computeMonthSnapshots(params: {
     shopping,
     myBills,
     adjustments,
+    incomePaydays,
     loanedOutItems,
     baseBankBalance
   } = params;
   const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
 
-  const baseIncomeTotal = totalLineItems(income);
   const baseHouseBillsTotal = totalLineItems(houseBills);
   const baseShoppingTotal = totalLineItems(shopping);
   const baseMyBillsTotal = totalLineItems(myBills);
@@ -236,6 +255,7 @@ export function computeMonthSnapshots(params: {
       const shoppingAdjustments = totalAdjustmentsForMonth(payment.month, "shopping", adjustments);
       const myBillsAdjustments = totalAdjustmentsForMonth(payment.month, "myBills", adjustments);
 
+      const baseIncomeTotal = incomeTotalForMonth(payment.month, income, incomePaydays);
       const incomeTotal = normalizeCurrency(baseIncomeTotal + incomeAdjustments);
       const houseBillsTotal = normalizeCurrency(baseHouseBillsTotal + houseAdjustments);
       const shoppingTotal = normalizeCurrency(baseShoppingTotal + shoppingAdjustments);

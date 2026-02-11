@@ -10,7 +10,8 @@ import { authedRequest } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
 import { computeUpcomingDueDate, formatDueDateLabel } from "@/lib/cards/due-date";
 import { computeCardMonthProjections } from "@/lib/formulas/engine";
-import { formatGBP } from "@/lib/util/format";
+import { monthKeyInTimeZone } from "@/lib/util/dates";
+import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
 interface CardData {
   cards: Array<{
@@ -198,7 +199,8 @@ export default function CardsPage() {
 
   useEffect(() => {
     if (!month && months.length > 0) {
-      setMonth(months[0]);
+      const currentMonth = monthKeyInTimeZone();
+      setMonth(months.includes(currentMonth) ? currentMonth : months[0]);
     }
   }, [month, months]);
 
@@ -217,6 +219,7 @@ export default function CardsPage() {
   }, [cardsQuery.data, paymentsQuery.data]);
 
   const activeProjection = month ? projectionsByMonth.get(month) || null : null;
+  const selectedMonthLabel = month ? formatMonthKeyUK(month) : "selected month";
 
   useEffect(() => {
     if (!cardsQuery.data?.cards) {
@@ -371,7 +374,7 @@ export default function CardsPage() {
       })
     });
 
-    setMessage(`Saved monthly payments for ${month}`);
+    setMessage(`Saved monthly payments for ${selectedMonthLabel}`);
     await paymentsQuery.refetch();
   }
 
@@ -654,11 +657,11 @@ export default function CardsPage() {
                       <span className="mobile-edit-keyval-value">{formatGBP(available)}</span>
                     </div>
                     <div className="mobile-edit-keyval">
-                      <span className="mobile-edit-keyval-label">Interest ({month || "month"})</span>
+                      <span className="mobile-edit-keyval-label">Interest ({selectedMonthLabel})</span>
                       <span className="mobile-edit-keyval-value">{formatGBP(projection?.interestAdded ?? 0)}</span>
                     </div>
                     <div className="mobile-edit-keyval">
-                      <span className="mobile-edit-keyval-label">Projected used ({month || "month"})</span>
+                      <span className="mobile-edit-keyval-label">Projected used ({selectedMonthLabel})</span>
                       <span className="mobile-edit-keyval-value">
                         {formatGBP(projection?.closingBalance ?? draft.usedLimit)}
                       </span>
@@ -671,7 +674,7 @@ export default function CardsPage() {
             <MobileEditDrawer
               open={Boolean(mobileCard && mobileCardDraft)}
               title={mobileCard ? `Edit ${mobileCard.name}` : "Edit card"}
-              subtitle={`Update card details for ${month || "selected month"}.`}
+              subtitle={`Update card details for ${selectedMonthLabel}.`}
               onClose={() => setMobileCardEditId(null)}
               footer={
                 <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -804,8 +807,8 @@ export default function CardsPage() {
                   <th>Due Day</th>
                   <th>Next Due</th>
                   <th>Available</th>
-                  <th>Interest ({month || "month"})</th>
-                  <th>Projected Used ({month || "month"})</th>
+                  <th>Interest ({selectedMonthLabel})</th>
+                  <th>Projected Used ({selectedMonthLabel})</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -996,7 +999,7 @@ export default function CardsPage() {
             >
               {months.map((entry) => (
                 <option key={entry} value={entry}>
-                  {entry}
+                  {formatMonthKeyUK(entry)}
                 </option>
               ))}
             </select>

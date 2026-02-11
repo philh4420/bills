@@ -42,6 +42,13 @@ export interface MonthlyCardPayments {
   updatedAt: string;
 }
 
+export interface MonthlyIncomePaydays {
+  month: MonthKey;
+  byIncomeId: Record<string, number[]>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LineItem {
   id: string;
   name: string;

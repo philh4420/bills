@@ -64,6 +64,16 @@ export const monthlyPaymentsPutSchema = z.object({
   inferred: z.boolean().default(false)
 });
 
+export const monthlyIncomePaydaysPutSchema = z.object({
+  byIncomeId: z.record(
+    z.string(),
+    z
+      .array(z.number().int().min(1).max(31))
+      .min(1)
+      .nullable()
+  )
+});
+
 export const adjustmentCategorySchema = z.enum(["income", "houseBills", "shopping", "myBills"]);
 export const incomeSourceTypeSchema = z.enum(["loan", "bonus", "other"]);
 

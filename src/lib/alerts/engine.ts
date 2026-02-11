@@ -1,5 +1,6 @@
 import { computeUpcomingDueDate, formatDueDateLabel, getDatePartsInTimeZone } from "@/lib/cards/due-date";
 import { APP_TIMEZONE } from "@/lib/util/constants";
+import { formatMonthKeyUK } from "@/lib/util/format";
 import { normalizeCurrency } from "@/lib/util/numbers";
 import { AlertSettings, CardAccount, MonthSnapshot, SmartAlert } from "@/types";
 
@@ -45,7 +46,7 @@ export function buildSmartAlerts(params: {
       type: "low-money-left",
       severity: snapshot.moneyLeft < 0 ? "critical" : "warning",
       title: "Money-left forecast below threshold",
-      message: `Forecast is £${snapshot.moneyLeft.toFixed(2)} for ${selectedMonth} (threshold £${settings.lowMoneyLeftThreshold.toFixed(2)}).`,
+      message: `Forecast is £${snapshot.moneyLeft.toFixed(2)} for ${formatMonthKeyUK(selectedMonth)} (threshold £${settings.lowMoneyLeftThreshold.toFixed(2)}).`,
       month: selectedMonth,
       actionUrl: "/dashboard",
       amount: snapshot.moneyLeft

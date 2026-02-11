@@ -56,10 +56,22 @@ function toEvent(params: {
   };
 }
 
+function isMonthInRange(month: string, startMonth: string, endMonth?: string): boolean {
+  if (month < startMonth) {
+    return false;
+  }
+  if (endMonth && month > endMonth) {
+    return false;
+  }
+  return true;
+}
+
 export function buildMonthTimeline(params: {
   selectedMonth: string;
   cards: Array<Pick<CardAccount, "id" | "name" | "dueDayOfMonth">>;
   monthlyPayments: Pick<MonthlyCardPayments, "byCardId"> | null;
+  income: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
+  incomePaydayOverridesByIncomeId: Record<string, number[]>;
   houseBills: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
   shopping: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
   myBills: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
@@ -68,7 +80,18 @@ export function buildMonthTimeline(params: {
   >;
   loanedOutItems: Array<Pick<LoanedOutItem, "id" | "name" | "amount" | "startMonth" | "status" | "paidBackMonth">>;
 }): MonthTimeline {
-  const { selectedMonth, cards, monthlyPayments, houseBills, shopping, myBills, adjustments, loanedOutItems } = params;
+  const {
+    selectedMonth,
+    cards,
+    monthlyPayments,
+    income,
+    incomePaydayOverridesByIncomeId,
+    houseBills,
+    shopping,
+    myBills,
+    adjustments,
+    loanedOutItems
+  } = params;
   const { year, monthNumber } = parseMonthKey(selectedMonth);
   const events: MonthTimelineEvent[] = [];
 
@@ -86,6 +109,26 @@ export function buildMonthTimeline(params: {
         amount: -Math.max(0, monthlyPayments?.byCardId[card.id] ?? 0)
       })
     );
+  });
+
+  income.forEach((item) => {
+    const overrideDays = incomePaydayOverridesByIncomeId[item.id] || [];
+    const paydays = overrideDays.length > 0 ? overrideDays : [item.dueDayOfMonth ?? 1];
+    paydays.forEach((payday, index) => {
+      events.push(
+        toEvent({
+          id: `income-${item.id}-${selectedMonth}-${payday}-${index}`,
+          type: "adjustment",
+          title: item.name,
+          subtitle: "Income paid",
+          category: "income",
+          year,
+          monthNumber,
+          dueDayOfMonth: payday,
+          amount: Math.max(0, item.amount)
+        })
+      );
+    });
   });
 
   const billCollections = [
@@ -113,15 +156,18 @@ export function buildMonthTimeline(params: {
   });
 
   adjustments
-    .filter((adjustment) => adjustment.startMonth === selectedMonth && adjustment.endMonth === selectedMonth)
+    .filter((adjustment) => isMonthInRange(selectedMonth, adjustment.startMonth, adjustment.endMonth))
     .forEach((adjustment) => {
       const sign = adjustment.category === "income" ? 1 : -1;
+      const isOneOff = Boolean(adjustment.endMonth && adjustment.endMonth === adjustment.startMonth);
       events.push(
         toEvent({
           id: `adjustment-${adjustment.id}-${selectedMonth}`,
           type: "adjustment",
           title: adjustment.name,
-          subtitle: `One-off ${adjustment.category} adjustment`,
+          subtitle: isOneOff
+            ? `One-off ${adjustment.category} adjustment`
+            : `${adjustment.category} adjustment`,
           category: adjustment.category,
           year,
           monthNumber,

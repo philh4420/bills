@@ -1,5 +1,7 @@
 import dayjs from "dayjs";
 
+import { APP_TIMEZONE } from "@/lib/util/constants";
+
 export function toIsoNow(): string {
   return new Date().toISOString();
 }
@@ -41,4 +43,16 @@ export function monthRangeInclusive(startMonth: string, endMonth: string): strin
   }
 
   return out;
+}
+
+export function monthKeyInTimeZone(value: Date = new Date(), timeZone: string = APP_TIMEZONE): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit"
+  });
+  const parts = formatter.formatToParts(value);
+  const year = parts.find((entry) => entry.type === "year")?.value || "0000";
+  const month = parts.find((entry) => entry.type === "month")?.value || "01";
+  return `${year}-${month}`;
 }

@@ -13,6 +13,7 @@ import {
   LoanedOutItem,
   MonthlyAdjustment,
   MonthlyCardPayments,
+  MonthlyIncomePaydays,
   MonthSnapshot,
   PushSubscriptionRecord,
   PurchasePlan,
@@ -53,6 +54,17 @@ function mapDocs<T>(docs: QueryDocumentSnapshot<DocumentData>[]): T[] {
   return docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<T, "id">) } as T));
 }
 
+function normalizeDayList(input: unknown): number[] {
+  const values = Array.isArray(input) ? input : typeof input === "number" ? [input] : [];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => Number.parseInt(String(value), 10))
+        .filter((value) => Number.isInteger(value) && value >= 1 && value <= 31)
+    )
+  ).sort((a, b) => a - b);
+}
+
 export async function upsertUserProfile(profile: UserProfile): Promise<void> {
   await userDoc(profile.uid).set(stripUndefined(profile), { merge: true });
 }
@@ -74,12 +86,27 @@ export async function listMonthlyPayments(uid: string): Promise<MonthlyCardPayme
   return mapDocs<MonthlyCardPayments>(snap.docs);
 }
 
+export async function listMonthlyIncomePaydays(uid: string): Promise<MonthlyIncomePaydays[]> {
+  const snap = await userDoc(uid)
+    .collection(COLLECTIONS.monthlyIncomePaydays)
+    .orderBy("month", "asc")
+    .get();
+  return mapDocs<MonthlyIncomePaydays>(snap.docs).map((entry) => ({
+    ...entry,
+    byIncomeId: Object.fromEntries(
+      Object.entries(entry.byIncomeId || {})
+        .map(([incomeId, dayOrDays]) => [incomeId, normalizeDayList(dayOrDays)])
+        .filter(([, days]) => days.length > 0)
+    )
+  }));
+}
+
 export async function listLineItems(
   uid: string,
   collection: "houseBills" | "incomeItems" | "shoppingItems" | "myBills"
 ): Promise<LineItem[]> {
   const snap = await userDoc(uid).collection(COLLECTIONS[collection]).orderBy("name", "asc").get();
-  const defaultDueDay = collection === "incomeItems" ? null : 1;
+  const defaultDueDay = 1;
   return mapDocs<LineItem>(snap.docs).map((item) => ({
     ...item,
     dueDayOfMonth: item.dueDayOfMonth ?? defaultDueDay
@@ -223,6 +250,17 @@ export async function upsertMonthlyPayment(
 ): Promise<void> {
   await userDoc(uid)
     .collection(COLLECTIONS.monthlyCardPayments)
+    .doc(month)
+    .set(stripUndefined({ month, ...payload }), { merge: true });
+}
+
+export async function upsertMonthlyIncomePaydays(
+  uid: string,
+  month: string,
+  payload: Omit<MonthlyIncomePaydays, "month">
+): Promise<void> {
+  await userDoc(uid)
+    .collection(COLLECTIONS.monthlyIncomePaydays)
     .doc(month)
     .set(stripUndefined({ month, ...payload }), { merge: true });
 }

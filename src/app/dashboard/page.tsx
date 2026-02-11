@@ -8,7 +8,7 @@ import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
 import { authedRequest } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
-import { formatGBP } from "@/lib/util/format";
+import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
 interface TimelineEvent {
   id: string;
@@ -229,6 +229,20 @@ export default function DashboardPage() {
       .slice(0, 2);
   }, [calendarWeeks]);
 
+  const timelineSummary = useMemo(() => {
+    const events = data?.timeline?.events || [];
+    const incomingTotal = events.reduce((acc, event) => acc + (event.amount > 0 ? event.amount : 0), 0);
+    const outgoingTotal = events.reduce(
+      (acc, event) => acc + (event.amount < 0 ? Math.abs(event.amount) : 0),
+      0
+    );
+    return {
+      monthLabel: formatMonthKeyUK(data?.timeline?.month || ""),
+      incomingTotal,
+      outgoingTotal
+    };
+  }, [data?.timeline]);
+
   async function saveAlertSettings() {
     const lowMoneyLeftThreshold = Number.parseFloat(settingsDraft.lowMoneyLeftThreshold);
     const utilizationThresholdPercent = Number.parseFloat(settingsDraft.utilizationThresholdPercent);
@@ -274,10 +288,10 @@ export default function DashboardPage() {
                 value={month || data?.selectedMonth || ""}
                 onChange={(event) => setMonth(event.target.value || null)}
               >
-                <option value="">Latest</option>
+                <option value="">Current month</option>
                 {(data?.availableMonths || []).map((entry) => (
                   <option key={entry} value={entry}>
-                    {entry}
+                    {formatMonthKeyUK(entry)}
                   </option>
                 ))}
               </select>
@@ -311,7 +325,7 @@ export default function DashboardPage() {
               </div>
 
               <div className="panel p-4">
-                <p className="label">Cashflow shape ({data.snapshot.month})</p>
+                <p className="label">Cashflow shape ({formatMonthKeyUK(data.snapshot.month)})</p>
                 <div className="mt-4 h-56 sm:h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData}>
@@ -418,12 +432,26 @@ export default function DashboardPage() {
 
         <SectionPanel
           title="Monthly timeline"
-          subtitle="Calendar timeline for card due dates, bill dates, and one-off adjustments to spot heavy weeks."
+          subtitle={
+            data?.timeline?.month || data?.selectedMonth
+              ? `UK calendar view for ${formatMonthKeyUK(
+                  data?.timeline?.month || data?.selectedMonth || ""
+                )}. Includes income pay dates, card due dates, bills, and adjustments.`
+              : "UK calendar view of income pay dates, card due dates, bills, and adjustments."
+          }
         >
           {calendarWeeks.length === 0 ? (
             <p className="text-sm text-[var(--ink-soft)]">No timeline data available for this month.</p>
           ) : (
             <div className="space-y-3">
+              <div className="panel p-3">
+                <p className="text-sm font-semibold text-[var(--ink-main)]">{timelineSummary.monthLabel}</p>
+                <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                  Incoming: {formatGBP(timelineSummary.incomingTotal)} | Outgoing:{" "}
+                  {formatGBP(timelineSummary.outgoingTotal)}
+                </p>
+              </div>
+
               {heavyWeeks.length > 0 ? (
                 <div className="calendar-heavy">
                   {heavyWeeks.map((week) => (

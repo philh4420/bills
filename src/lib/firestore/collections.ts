@@ -1,6 +1,7 @@
 export const COLLECTIONS = {
   cardAccounts: "cardAccounts",
   monthlyCardPayments: "monthlyCardPayments",
+  monthlyIncomePaydays: "monthlyIncomePaydays",
   houseBills: "houseBills",
   incomeItems: "incomeItems",
   shoppingItems: "shoppingItems",

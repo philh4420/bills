@@ -8,7 +8,7 @@ import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
 import { authedRequest } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
-import { formatGBP } from "@/lib/util/format";
+import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
 interface Item {
   id: string;
@@ -40,6 +40,19 @@ interface LoanedOutItem {
 interface BankBalanceRecord {
   id: string;
   amount: number;
+}
+
+interface IncomePaydaysData {
+  months: string[];
+  selectedMonth: string;
+  incomes: Array<{
+    id: string;
+    name: string;
+    amount: number;
+    defaultPayDay: number;
+  }>;
+  byIncomeId: Record<string, number[]>;
+  hasOverrides: boolean;
 }
 
 const DUE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
@@ -78,6 +91,41 @@ function parseDueDayInput(value: string): number | null {
   return parsed;
 }
 
+function parsePaydayListInput(value: string): number[] | null {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const tokens = normalized
+    .split(/[,\s]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  const days = tokens.map((token) => Number.parseInt(token, 10));
+  if (
+    days.some((day) => !Number.isInteger(day) || day < 1 || day > 31)
+  ) {
+    return null;
+  }
+
+  return Array.from(new Set(days)).sort((a, b) => a - b);
+}
+
+function formatPaydayList(days: number[]): string {
+  return days.join(", ");
+}
+
+function dayListsEqual(left: number[], right: number[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
+}
+
 function normalizeMonthInput(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -109,7 +157,8 @@ function LineItemCollection({
   endpoint: "/api/house-bills" | "/api/income" | "/api/shopping" | "/api/my-bills";
   getIdToken: () => Promise<string | null>;
 }) {
-  const supportsDueDay = endpoint !== "/api/income";
+  const supportsDueDay = true;
+  const dueDayLabel = endpoint === "/api/income" ? "Pay day" : "Due day";
   const [newName, setNewName] = useState("");
   const [newAmount, setNewAmount] = useState("0");
   const [newDueDay, setNewDueDay] = useState("1");
@@ -230,7 +279,7 @@ function LineItemCollection({
                 </div>
                 {supportsDueDay ? (
                   <div className="mobile-edit-keyval">
-                    <span className="mobile-edit-keyval-label">Due day</span>
+                    <span className="mobile-edit-keyval-label">{dueDayLabel}</span>
                     <span className="mobile-edit-keyval-value">{dueLabel}</span>
                   </div>
                 ) : null}
@@ -321,7 +370,7 @@ function LineItemCollection({
               </div>
               {supportsDueDay ? (
                 <div>
-                  <p className="label">Due day</p>
+                  <p className="label">{dueDayLabel}</p>
                   <select
                     className="input mt-1"
                     value={mobileDraft.dueDayOfMonth ? String(mobileDraft.dueDayOfMonth) : ""}
@@ -396,9 +445,9 @@ function LineItemCollection({
             </div>
             {supportsDueDay ? (
               <div>
-                <p className="label">Due day</p>
+                <p className="label">{dueDayLabel}</p>
                 <select className="input mt-1" value={newDueDay} onChange={(event) => setNewDueDay(event.target.value)}>
-                  <option value="">Due day</option>
+                  <option value="">{dueDayLabel}</option>
                   {DUE_DAY_OPTIONS.map((day) => (
                     <option key={`new-line-due-${endpoint}-${day}`} value={day}>
                       {day}
@@ -417,7 +466,7 @@ function LineItemCollection({
             <tr>
               <th>Name</th>
               <th>Amount</th>
-              {supportsDueDay ? <th>Due day</th> : null}
+              {supportsDueDay ? <th>{dueDayLabel}</th> : null}
               <th>Actions</th>
             </tr>
           </thead>
@@ -514,7 +563,7 @@ function LineItemCollection({
               {supportsDueDay ? (
                 <td>
                   <select className="input" value={newDueDay} onChange={(event) => setNewDueDay(event.target.value)}>
-                    <option value="">Due day</option>
+                    <option value="">{dueDayLabel}</option>
                     {DUE_DAY_OPTIONS.map((day) => (
                       <option key={`desktop-new-line-due-${endpoint}-${day}`} value={day}>
                         {day}
@@ -534,6 +583,185 @@ function LineItemCollection({
       </div>
 
       {message ? <p className="mt-2 text-sm text-[var(--accent-strong)]">{message}</p> : null}
+    </SectionPanel>
+  );
+}
+
+function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
+  const [month, setMonth] = useState<string>("");
+  const [draftTextByIncomeId, setDraftTextByIncomeId] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<string | null>(null);
+
+  const query = useQuery({
+    queryKey: ["income-paydays", month],
+    queryFn: () =>
+      authedRequest<IncomePaydaysData>(
+        getIdToken,
+        `/api/income-paydays${month ? `?month=${encodeURIComponent(month)}` : ""}`
+      )
+  });
+
+  useEffect(() => {
+    if (!month && query.data?.selectedMonth) {
+      setMonth(query.data.selectedMonth);
+    }
+  }, [month, query.data?.selectedMonth]);
+
+  useEffect(() => {
+    if (!query.data?.byIncomeId) {
+      return;
+    }
+    setDraftTextByIncomeId(
+      Object.fromEntries(
+        Object.entries(query.data.byIncomeId).map(([incomeId, days]) => [incomeId, formatPaydayList(days)])
+      )
+    );
+  }, [query.data?.byIncomeId]);
+
+  const incomes = query.data?.incomes || [];
+  const selectedMonth = month || query.data?.selectedMonth || "";
+  const monthOptions = query.data?.months?.length
+    ? query.data.months
+    : selectedMonth
+      ? [selectedMonth]
+      : [];
+  const customCount = incomes.reduce((acc, income) => {
+    const parsed = parsePaydayListInput(draftTextByIncomeId[income.id] || "");
+    const currentDays = parsed && parsed.length > 0 ? parsed : [income.defaultPayDay];
+    return acc + (dayListsEqual(currentDays, [income.defaultPayDay]) ? 0 : 1);
+  }, 0);
+
+  async function saveMonthPaydays() {
+    if (!selectedMonth) {
+      return;
+    }
+
+    const payload: Record<string, number[] | null> = {};
+    for (const income of incomes) {
+      const parsed = parsePaydayListInput(draftTextByIncomeId[income.id] || "");
+      if (!parsed || parsed.length === 0) {
+        setMessage(`Invalid pay days for ${income.name}. Use values 1-31, for example: 2, 30.`);
+        return;
+      }
+
+      payload[income.id] = dayListsEqual(parsed, [income.defaultPayDay]) ? null : parsed;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/income-paydays/${selectedMonth}`, {
+        method: "PUT",
+        body: JSON.stringify({ byIncomeId: payload })
+      });
+      setMessage(`Saved income paydays for ${formatMonthKeyUK(selectedMonth)}`);
+      await query.refetch();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save income paydays");
+    }
+  }
+
+  return (
+    <SectionPanel
+      title="Monthly Income Paydays"
+      subtitle="Override pay days per month for 4-week cycles without creating a second income item. Use comma-separated days like 2, 30."
+      right={
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <select
+            className="input w-full sm:min-w-[140px] sm:w-auto"
+            value={selectedMonth}
+            onChange={(event) => setMonth(event.target.value)}
+          >
+            {monthOptions.map((entry) => (
+              <option key={`income-payday-month-${entry}`} value={entry}>
+                {formatMonthKeyUK(entry)}
+              </option>
+            ))}
+          </select>
+          <button className="button-primary w-full sm:w-auto" type="button" onClick={() => saveMonthPaydays()}>
+            Save month
+          </button>
+        </div>
+      }
+    >
+      {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
+      {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
+
+      <div className="space-y-3 xl:hidden">
+        {incomes.map((income) => {
+          const payDayText = draftTextByIncomeId[income.id] || String(income.defaultPayDay);
+          return (
+            <div className="mobile-edit-card" key={`income-payday-mobile-${income.id}`}>
+              <div className="mobile-edit-card-head">
+                <div className="min-w-0">
+                  <p className="mobile-edit-card-title">{income.name}</p>
+                  <p className="mobile-edit-card-subtitle">Monthly value: {formatGBP(income.amount)}</p>
+                </div>
+              </div>
+              <div className="mt-3">
+                <p className="label">Pay days</p>
+                <input
+                  className="input mt-1"
+                  value={payDayText}
+                  onChange={(event) =>
+                    setDraftTextByIncomeId((prev) => ({
+                      ...prev,
+                      [income.id]: event.target.value
+                    }))
+                  }
+                  placeholder={`e.g. ${income.defaultPayDay} or 2, 30`}
+                />
+                <p className="mt-1 text-xs text-[var(--ink-soft)]">Default: {income.defaultPayDay}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="table-wrap hidden xl:block">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Amount</th>
+              <th>Pay days</th>
+              <th>Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            {incomes.map((income) => {
+              const payDayText = draftTextByIncomeId[income.id] || String(income.defaultPayDay);
+              return (
+                <tr key={`income-payday-row-${income.id}`}>
+                  <td>{income.name}</td>
+                  <td>{formatGBP(income.amount)}</td>
+                  <td>
+                    <input
+                      className="input"
+                      value={payDayText}
+                      onChange={(event) =>
+                        setDraftTextByIncomeId((prev) => ({
+                          ...prev,
+                          [income.id]: event.target.value
+                        }))
+                      }
+                      placeholder={`e.g. ${income.defaultPayDay} or 2, 30`}
+                    />
+                  </td>
+                  <td>{income.defaultPayDay}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-2 text-sm text-[var(--ink-soft)]">
+        Custom month overrides: {customCount}
+      </p>
+      <p className="mt-1 text-xs text-[var(--ink-soft)]">
+        Enter one or more pay days (1-31), comma-separated. Example: <code>2, 30</code>.
+      </p>
+      {message ? <p className="mt-1 text-sm text-[var(--accent-strong)]">{message}</p> : null}
     </SectionPanel>
   );
 }
@@ -2514,10 +2742,11 @@ export default function BillsPage() {
         />
         <LineItemCollection
           title="Income"
-          subtitle="Income sources used in monthly calculations."
+          subtitle="Income sources used in monthly calculations. Set pay day for each income line."
           endpoint="/api/income"
           getIdToken={getIdToken}
         />
+        <MonthlyIncomePaydaysCollection getIdToken={getIdToken} />
         <BankBalanceSection getIdToken={getIdToken} />
         <ExtraIncomeCollection getIdToken={getIdToken} />
         <LoanedOutCollection getIdToken={getIdToken} />
