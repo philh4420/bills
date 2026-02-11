@@ -38,6 +38,13 @@ interface VapidPublicKeyResponse {
   publicKey: string;
 }
 
+interface PushTestResponse {
+  ok: boolean;
+  sent: number;
+  failed: number;
+  deleted: number;
+}
+
 type CardRecord = CardData["cards"][number];
 
 type DueTone = "neutral" | "ok" | "warn" | "danger";
@@ -131,6 +138,26 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+function isLikelyAppleMobileDevice(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  const ua = navigator.userAgent.toLowerCase();
+  const platform = navigator.platform || "";
+  return /iphone|ipad|ipod/.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneDisplayMode(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const mediaStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches ?? false;
+  const iosStandalone = Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+  return mediaStandalone || iosStandalone;
+}
+
 export default function CardsPage() {
   const { getIdToken } = useAuth();
   const [month, setMonth] = useState<string>("");
@@ -145,6 +172,8 @@ export default function CardsPage() {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<string>("default");
+  const [isInstalledApp, setIsInstalledApp] = useState(false);
+  const [isAppleMobileDevice, setIsAppleMobileDevice] = useState(false);
   const [mobileCardEditId, setMobileCardEditId] = useState<string | null>(null);
 
   const cardsQuery = useQuery({
@@ -218,12 +247,42 @@ export default function CardsPage() {
       return;
     }
 
+    setIsAppleMobileDevice(isLikelyAppleMobileDevice());
+    setIsInstalledApp(isStandaloneDisplayMode());
+
+    const mediaQuery = window.matchMedia("(display-mode: standalone)");
+    const updateStandalone = () => {
+      setIsInstalledApp(isStandaloneDisplayMode());
+    };
+
+    updateStandalone();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateStandalone);
+    } else if (typeof mediaQuery.addListener === "function") {
+      mediaQuery.addListener(updateStandalone);
+    }
+
+    window.addEventListener("focus", updateStandalone);
+    document.addEventListener("visibilitychange", updateStandalone);
+
+    const cleanup = () => {
+      if (typeof mediaQuery.removeEventListener === "function") {
+        mediaQuery.removeEventListener("change", updateStandalone);
+      } else if (typeof mediaQuery.removeListener === "function") {
+        mediaQuery.removeListener(updateStandalone);
+      }
+
+      window.removeEventListener("focus", updateStandalone);
+      document.removeEventListener("visibilitychange", updateStandalone);
+    };
+
     const supported =
       "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
     setPushSupported(supported);
 
     if (!supported) {
-      return;
+      return cleanup;
     }
 
     setNotificationPermission(Notification.permission);
@@ -235,6 +294,8 @@ export default function CardsPage() {
       const subscription = await registration.pushManager.getSubscription();
       setPushSubscribed(Boolean(subscription));
     })();
+
+    return cleanup;
   }, []);
 
   async function saveCard(cardId: string) {
@@ -277,6 +338,13 @@ export default function CardsPage() {
   async function enablePushReminders() {
     if (!pushSupported || typeof window === "undefined") {
       setPushMessage("Push notifications are not supported on this device/browser.");
+      return;
+    }
+
+    if (isAppleMobileDevice && !isInstalledApp) {
+      setPushMessage(
+        "Install to Home Screen first, open the installed app, then enable push reminders."
+      );
       return;
     }
 
@@ -371,6 +439,31 @@ export default function CardsPage() {
       setPushMessage("Push reminders disabled.");
     } catch (error) {
       setPushMessage(error instanceof Error ? error.message : "Failed to disable push reminders.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function sendTestPushNotification() {
+    if (!pushSubscribed) {
+      setPushMessage("Enable push reminders first.");
+      return;
+    }
+
+    setPushBusy(true);
+    setPushMessage(null);
+
+    try {
+      const result = await authedRequest<PushTestResponse>(getIdToken, "/api/notifications/test", {
+        method: "POST"
+      });
+      if (result.sent > 0) {
+        setPushMessage(`Test notification sent (${result.sent}).`);
+      } else {
+        setPushMessage("No active push subscription found for this account.");
+      }
+    } catch (error) {
+      setPushMessage(error instanceof Error ? error.message : "Failed to send test notification.");
     } finally {
       setPushBusy(false);
     }
@@ -699,6 +792,10 @@ export default function CardsPage() {
           subtitle="Enable browser push notifications for card due date reminders. On iOS, install the app to Home Screen first."
         >
           <div className="panel p-4">
+            <p className="text-xs text-[var(--ink-soft)]">
+              Installed app mode:{" "}
+              <span className="font-medium text-[var(--ink-main)]">{isInstalledApp ? "Yes" : "No"}</span>
+            </p>
             <p className="text-sm text-[var(--ink-soft)]">
               Status:{" "}
               <span className="font-medium text-[var(--ink-main)]">
@@ -717,7 +814,7 @@ export default function CardsPage() {
                 className="button-primary w-full sm:w-auto"
                 type="button"
                 onClick={() => enablePushReminders()}
-                disabled={pushBusy || !pushSupported}
+                disabled={pushBusy || !pushSupported || (isAppleMobileDevice && !isInstalledApp)}
               >
                 {pushBusy ? "Working..." : "Enable push reminders"}
               </button>
@@ -729,8 +826,21 @@ export default function CardsPage() {
               >
                 Disable push
               </button>
+              <button
+                className="button-secondary w-full sm:w-auto"
+                type="button"
+                onClick={() => sendTestPushNotification()}
+                disabled={pushBusy || !pushSubscribed}
+              >
+                Send test push
+              </button>
             </div>
             {pushMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{pushMessage}</p> : null}
+            {isAppleMobileDevice && !isInstalledApp ? (
+              <p className="mt-2 text-xs text-[var(--ink-soft)]">
+                iPhone/iPad web push only works in the installed Home Screen app.
+              </p>
+            ) : null}
             <p className="mt-2 text-xs text-[var(--ink-soft)]">
               Reminders are sent daily from Vercel Cron for cards due in 7, 3, and 1 days.
             </p>
