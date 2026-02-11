@@ -13,12 +13,12 @@ export function SectionPanel({
 }) {
   return (
     <section className="panel overflow-hidden">
-      <div className="flex items-start justify-between gap-3 border-b border-[var(--ring)] bg-gradient-to-r from-white/70 to-transparent px-4 py-4 md:px-5">
+      <div className="flex flex-col gap-3 border-b border-[var(--ring)] bg-gradient-to-r from-white/70 to-transparent px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-5">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-[var(--ink-main)]">{title}</h2>
           {subtitle ? <p className="mt-1 text-sm text-[var(--ink-soft)]">{subtitle}</p> : null}
         </div>
-        {right ? <div className="shrink-0">{right}</div> : null}
+        {right ? <div className="w-full sm:w-auto sm:shrink-0">{right}</div> : null}
       </div>
       <div className="px-4 py-4 md:px-5 md:py-5">
         {children}

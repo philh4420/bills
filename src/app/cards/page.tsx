@@ -143,7 +143,80 @@ export default function CardsPage() {
           {cardsQuery.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading cards...</p> : null}
           {cardsQuery.error ? <p className="text-sm text-red-700">{(cardsQuery.error as Error).message}</p> : null}
 
-          <div className="table-wrap">
+          <div className="space-y-3 md:hidden">
+            {(cardsQuery.data?.cards || []).map((card) => {
+              const draft = cardDrafts[card.id] || {
+                limit: card.limit,
+                usedLimit: card.usedLimit,
+                interestRateApr: card.interestRateApr ?? 0
+              };
+              const available = draft.limit - draft.usedLimit;
+              const projection = activeProjection?.entries[card.id];
+
+              return (
+                <div className="panel p-4" key={`mobile-${card.id}`}>
+                  <p className="text-sm font-semibold text-[var(--ink-main)]">{card.name}</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="label">Limit</p>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        step="0.01"
+                        value={draft.limit}
+                        onChange={(event) =>
+                          setCardDrafts((prev) => ({
+                            ...prev,
+                            [card.id]: { ...draft, limit: Number(event.target.value) }
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="label">Used</p>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        step="0.01"
+                        value={draft.usedLimit}
+                        onChange={(event) =>
+                          setCardDrafts((prev) => ({
+                            ...prev,
+                            [card.id]: { ...draft, usedLimit: Number(event.target.value) }
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="label">APR %</p>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        step="0.01"
+                        value={draft.interestRateApr}
+                        onChange={(event) =>
+                          setCardDrafts((prev) => ({
+                            ...prev,
+                            [card.id]: { ...draft, interestRateApr: Number(event.target.value) }
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 text-sm text-[var(--ink-soft)]">
+                      <p>Available: {formatGBP(available)}</p>
+                      <p>Interest ({month || "month"}): {formatGBP(projection?.interestAdded ?? 0)}</p>
+                      <p>Projected used: {formatGBP(projection?.closingBalance ?? draft.usedLimit)}</p>
+                    </div>
+                  </div>
+                  <button className="button-secondary mt-3 w-full" type="button" onClick={() => saveCard(card.id)}>
+                    Save {card.name}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="table-wrap hidden md:block">
             <table>
               <thead>
                 <tr>
@@ -231,7 +304,11 @@ export default function CardsPage() {
           title="Monthly payment plan"
           subtitle="Edit per-card payment amounts for a month and preserve formula variant parity."
           right={
-            <select className="input min-w-[140px]" value={month} onChange={(event) => setMonth(event.target.value)}>
+            <select
+              className="input w-full sm:min-w-[140px] sm:w-auto"
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+            >
               {months.map((entry) => (
                 <option key={entry} value={entry}>
                   {entry}
@@ -242,7 +319,7 @@ export default function CardsPage() {
         >
           {activePayment ? (
             <div className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {(cardsQuery.data?.cards || []).map((card) => (
                   <div className="panel p-4" key={card.id}>
                     <p className="label">{card.name}</p>
@@ -268,13 +345,13 @@ export default function CardsPage() {
                 ))}
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
                 <label className="label" htmlFor="formulaVariant">
                   Formula variant
                 </label>
                 <select
                   id="formulaVariant"
-                  className="input max-w-xs"
+                  className="input w-full sm:max-w-xs"
                   value={formulaVariantId}
                   onChange={(event) => setFormulaVariantId(event.target.value)}
                 >
@@ -282,11 +359,11 @@ export default function CardsPage() {
                   <option value="money-left-may-quirk">money-left-may-quirk</option>
                 </select>
 
-                <button className="button-primary" type="button" onClick={() => saveMonthly()}>
+                <button className="button-primary w-full sm:w-auto" type="button" onClick={() => saveMonthly()}>
                   Save month
                 </button>
 
-                <p className="text-sm text-[var(--ink-soft)]">Total: {formatGBP(activePayment.total)}</p>
+                <p className="text-sm text-[var(--ink-soft)] lg:ml-auto">Total: {formatGBP(activePayment.total)}</p>
               </div>
             </div>
           ) : (

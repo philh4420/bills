@@ -103,11 +103,11 @@ export default function ImportPage() {
               />
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button className="button-secondary" disabled={busy || !file} type="button" onClick={() => run(false)}>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button className="button-secondary w-full sm:w-auto" disabled={busy || !file} type="button" onClick={() => run(false)}>
                 {busy ? "Working..." : "Preview"}
               </button>
-              <button className="button-primary" disabled={busy || !file} type="button" onClick={() => run(true)}>
+              <button className="button-primary w-full sm:w-auto" disabled={busy || !file} type="button" onClick={() => run(true)}>
                 {busy ? "Working..." : "Commit Import"}
               </button>
             </div>

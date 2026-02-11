@@ -81,9 +81,9 @@ export default function DashboardPage() {
           title="Monthly overview"
           subtitle="Live totals based on cards, bills, and formula-variant parity."
           right={
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <select
-                className="input min-w-[140px]"
+                className="input w-full sm:min-w-[140px] sm:w-auto"
                 value={month || data?.selectedMonth || ""}
                 onChange={(event) => setMonth(event.target.value || null)}
               >
@@ -94,7 +94,7 @@ export default function DashboardPage() {
                   </option>
                 ))}
               </select>
-              <button type="button" className="button-secondary" onClick={() => refetch()}>
+              <button type="button" className="button-secondary w-full sm:w-auto" onClick={() => refetch()}>
                 Refresh
               </button>
             </div>
@@ -119,7 +119,7 @@ export default function DashboardPage() {
 
               <div className="panel p-4">
                 <p className="label">Cashflow shape ({data.snapshot.month})</p>
-                <div className="mt-4 h-72">
+                <div className="mt-4 h-56 sm:h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData}>
                       <XAxis dataKey="name" tick={{ fill: "#556273", fontSize: 12 }} />

@@ -73,7 +73,8 @@ function LineItemCollection({
     setDrafts(next);
   }, [query.data]);
 
-  const total = (query.data?.items || []).reduce((acc, item) => acc + item.amount, 0);
+  const items = query.data?.items || [];
+  const total = items.reduce((acc, item) => acc + item.amount, 0);
 
   async function addItem() {
     if (!newName.trim()) {
@@ -124,7 +125,92 @@ function LineItemCollection({
       {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
       {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
 
-      <div className="table-wrap">
+      <div className="space-y-3 md:hidden">
+        {items.map((item) => {
+          const draft = drafts[item.id] || item;
+          return (
+            <div className="panel p-4" key={`mobile-${item.id}`}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <p className="label">Name</p>
+                  <input
+                    className="input mt-1"
+                    value={draft.name}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: {
+                          ...prev[item.id],
+                          name: event.target.value
+                        }
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <p className="label">Amount</p>
+                  <input
+                    className="input mt-1"
+                    type="number"
+                    step="0.01"
+                    value={draft.amount}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: {
+                          ...prev[item.id],
+                          amount: Number(event.target.value)
+                        }
+                      }))
+                    }
+                  />
+                </div>
+                <div className="flex items-end text-xs text-[var(--ink-soft)]">
+                  Monthly value: {formatGBP(draft.amount)}
+                </div>
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => saveItem(item.id)}>
+                  Save
+                </button>
+                <button className="button-danger w-full sm:w-auto" type="button" onClick={() => deleteItem(item.id)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="panel p-4">
+          <p className="label">Add item</p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <input
+                className="input"
+                placeholder="New item"
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+              />
+            </div>
+            <div>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                value={newAmount}
+                onChange={(event) => setNewAmount(event.target.value)}
+              />
+            </div>
+            <div className="sm:self-end">
+              <button className="button-primary w-full sm:w-auto" type="button" onClick={() => addItem()}>
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="table-wrap hidden md:block">
         <table>
           <thead>
             <tr>
@@ -134,7 +220,7 @@ function LineItemCollection({
             </tr>
           </thead>
           <tbody>
-            {(query.data?.items || []).map((item) => (
+            {items.map((item) => (
               <tr key={item.id}>
                 <td>
                   <input
@@ -239,7 +325,8 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
     setDrafts(next);
   }, [query.data]);
 
-  const total = (query.data?.adjustments || []).reduce((acc, item) => acc + item.amount, 0);
+  const adjustments = query.data?.adjustments || [];
+  const total = adjustments.reduce((acc, item) => acc + item.amount, 0);
 
   async function createItem() {
     if (!newItem.name.trim()) {
@@ -345,7 +432,167 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
       {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
 
-      <div className="table-wrap">
+      <div className="space-y-3 md:hidden">
+        {adjustments.map((item) => {
+          const draft = drafts[item.id] || item;
+          return (
+            <div className="panel p-4" key={`mobile-adjustment-${item.id}`}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <p className="label">Name</p>
+                  <input
+                    className="input mt-1"
+                    value={draft.name}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], name: event.target.value }
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <p className="label">Category</p>
+                  <select
+                    className="input mt-1"
+                    value={draft.category}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: {
+                          ...prev[item.id],
+                          category: event.target.value as MonthlyAdjustment["category"]
+                        }
+                      }))
+                    }
+                  >
+                    <option value="houseBills">houseBills</option>
+                    <option value="shopping">shopping</option>
+                    <option value="myBills">myBills</option>
+                    <option value="income">income</option>
+                  </select>
+                </div>
+                <div>
+                  <p className="label">Amount</p>
+                  <input
+                    className="input mt-1"
+                    type="number"
+                    step="0.01"
+                    value={draft.amount}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], amount: Number(event.target.value) }
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <p className="label">Start</p>
+                  <input
+                    className="input mt-1"
+                    type="month"
+                    value={draft.startMonth}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], startMonth: event.target.value }
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <p className="label">End (optional)</p>
+                  <input
+                    className="input mt-1"
+                    type="month"
+                    value={draft.endMonth || ""}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], endMonth: event.target.value }
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => saveItem(item.id)}>
+                  Save
+                </button>
+                <button className="button-danger w-full sm:w-auto" type="button" onClick={() => deleteItem(item.id)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="panel p-4">
+          <p className="label">Add monthly adjustment</p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <input
+                className="input"
+                value={newItem.name}
+                placeholder="New adjustment"
+                onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+              />
+            </div>
+            <div>
+              <select
+                className="input"
+                value={newItem.category}
+                onChange={(event) =>
+                  setNewItem((prev) => ({
+                    ...prev,
+                    category: event.target.value as MonthlyAdjustment["category"]
+                  }))
+                }
+              >
+                <option value="houseBills">houseBills</option>
+                <option value="shopping">shopping</option>
+                <option value="myBills">myBills</option>
+                <option value="income">income</option>
+              </select>
+            </div>
+            <div>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                value={newItem.amount}
+                onChange={(event) => setNewItem((prev) => ({ ...prev, amount: event.target.value }))}
+              />
+            </div>
+            <div>
+              <input
+                className="input"
+                type="month"
+                value={newItem.startMonth}
+                onChange={(event) =>
+                  setNewItem((prev) => ({ ...prev, startMonth: event.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <input
+                className="input"
+                type="month"
+                value={newItem.endMonth}
+                onChange={(event) => setNewItem((prev) => ({ ...prev, endMonth: event.target.value }))}
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <button className="button-primary w-full sm:w-auto" type="button" onClick={() => createItem()}>
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="table-wrap hidden md:block">
         <table>
           <thead>
             <tr>
@@ -358,7 +605,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
             </tr>
           </thead>
           <tbody>
-            {(query.data?.adjustments || []).map((item) => (
+            {adjustments.map((item) => (
               <tr key={item.id}>
                 <td>
                   <input

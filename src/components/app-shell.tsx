@@ -47,26 +47,26 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
 
         <div className="min-w-0 flex-1">
           <header className="panel p-4 md:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div>
                 <p className="text-[0.62rem] uppercase tracking-[0.24em] text-[var(--ink-soft)]">Owner Dashboard</p>
                 <h2 className="mt-1 text-xl font-semibold text-[var(--ink-main)] md:text-2xl">{title}</h2>
               </div>
-              <div className="flex items-center gap-2 lg:hidden">
-                <button className="button-secondary" onClick={() => signOut()} type="button">
+              <div className="w-full sm:w-auto lg:hidden">
+                <button className="button-secondary w-full sm:w-auto" onClick={() => signOut()} type="button">
                   Sign Out
                 </button>
               </div>
             </div>
 
-            <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+            <nav className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:hidden">
               {NAV.map((item) => {
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`${active ? "tab-active" : "tab-idle"} whitespace-nowrap`}
+                    className={`${active ? "tab-active" : "tab-idle"} block w-full text-center sm:w-auto sm:text-left sm:whitespace-nowrap`}
                   >
                     {item.label}
                   </Link>

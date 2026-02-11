@@ -43,12 +43,13 @@ export default function PurchasesPage() {
     setDrafts(next);
   }, [query.data]);
 
+  const purchases = useMemo(() => query.data?.purchases || [], [query.data?.purchases]);
+
   const totals = useMemo(() => {
-    const all = query.data?.purchases || [];
-    const planned = all.filter((item) => item.status === "planned").reduce((acc, item) => acc + item.price, 0);
-    const bought = all.filter((item) => item.status === "bought").reduce((acc, item) => acc + item.price, 0);
+    const planned = purchases.filter((item) => item.status === "planned").reduce((acc, item) => acc + item.price, 0);
+    const bought = purchases.filter((item) => item.status === "bought").reduce((acc, item) => acc + item.price, 0);
     return { planned, bought };
-  }, [query.data]);
+  }, [purchases]);
 
   async function createPurchase() {
     setMessage(null);
@@ -105,7 +106,145 @@ export default function PurchasesPage() {
             </div>
           </div>
 
-          <div className="table-wrap">
+          {query.isLoading ? <p className="mb-3 text-sm text-[var(--ink-soft)]">Loading purchases...</p> : null}
+
+          <div className="space-y-3 md:hidden">
+            {purchases.map((item) => {
+              const draft = drafts[item.id] || item;
+              return (
+                <div className="panel p-4" key={`mobile-${item.id}`}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <p className="label">Name</p>
+                      <input
+                        className="input mt-1"
+                        value={draft.name}
+                        onChange={(event) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], name: event.target.value }
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="label">Price</p>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        step="0.01"
+                        value={draft.price}
+                        onChange={(event) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], price: Number(event.target.value) }
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="label">Status</p>
+                      <select
+                        className="input mt-1"
+                        value={draft.status}
+                        onChange={(event) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [item.id]: {
+                              ...prev[item.id],
+                              status: event.target.value as Purchase["status"]
+                            }
+                          }))
+                        }
+                      >
+                        <option value="planned">planned</option>
+                        <option value="bought">bought</option>
+                        <option value="skipped">skipped</option>
+                      </select>
+                    </div>
+                    <div>
+                      <p className="label">Alias</p>
+                      <input
+                        className="input mt-1"
+                        value={draft.alias || ""}
+                        onChange={(event) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], alias: event.target.value }
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="label">Link</p>
+                      <input
+                        className="input mt-1"
+                        value={draft.link || ""}
+                        onChange={(event) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], link: event.target.value }
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <button className="button-secondary mt-3 w-full sm:w-auto" type="button" onClick={() => savePurchase(item.id)}>
+                    Save
+                  </button>
+                </div>
+              );
+            })}
+
+            <div className="panel p-4">
+              <p className="label">Add purchase</p>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <input
+                    className="input"
+                    placeholder="New item"
+                    value={newItem.name}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={newItem.price}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, price: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <input
+                    className="input"
+                    placeholder="Alias"
+                    value={newItem.alias}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, alias: event.target.value }))}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <input
+                    className="input"
+                    placeholder="Link"
+                    value={newItem.link}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, link: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <p className="text-sm text-[var(--ink-soft)]">Status: planned</p>
+                </div>
+                <div className="sm:text-right">
+                  <button className="button-primary w-full sm:w-auto" type="button" onClick={() => createPurchase()}>
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="table-wrap hidden md:block">
             <table>
               <thead>
                 <tr>
@@ -118,7 +257,7 @@ export default function PurchasesPage() {
                 </tr>
               </thead>
               <tbody>
-                {(query.data?.purchases || []).map((item) => (
+                {purchases.map((item) => (
                   <tr key={item.id}>
                     <td>
                       <input
