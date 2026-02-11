@@ -39,19 +39,46 @@ export async function POST(request: NextRequest) {
             }
           );
 
-          return { sent: 1, failed: 0, deleted: 0 };
+          return {
+            sent: 1,
+            failed: 0,
+            deleted: 0,
+            detail: null as null | { endpoint: string; statusCode: number | null; message: string }
+          };
         } catch (error) {
           const statusCode =
             typeof error === "object" && error !== null && "statusCode" in error
               ? Number((error as { statusCode?: unknown }).statusCode)
               : null;
+          const message =
+            typeof error === "object" && error !== null && "message" in error
+              ? String((error as { message?: unknown }).message || "Push send failed")
+              : "Push send failed";
 
           if (statusCode === 404 || statusCode === 410) {
             await deletePushSubscription(uid, subscription.endpoint);
-            return { sent: 0, failed: 1, deleted: 1 };
+            return {
+              sent: 0,
+              failed: 1,
+              deleted: 1,
+              detail: {
+                endpoint: subscription.endpoint,
+                statusCode,
+                message
+              }
+            };
           }
 
-          return { sent: 0, failed: 1, deleted: 0 };
+          return {
+            sent: 0,
+            failed: 1,
+            deleted: 0,
+            detail: {
+              endpoint: subscription.endpoint,
+              statusCode,
+              message
+            }
+          };
         }
       })
     );
@@ -60,14 +87,23 @@ export async function POST(request: NextRequest) {
       (acc, result) => ({
         sent: acc.sent + result.sent,
         failed: acc.failed + result.failed,
-        deleted: acc.deleted + result.deleted
+        deleted: acc.deleted + result.deleted,
+        details: result.detail ? [...acc.details, result.detail] : acc.details
       }),
-      { sent: 0, failed: 0, deleted: 0 }
+      {
+        sent: 0,
+        failed: 0,
+        deleted: 0,
+        details: [] as Array<{ endpoint: string; statusCode: number | null; message: string }>
+      }
     );
 
     return jsonOk({
       ok: true,
-      ...summary
+      sent: summary.sent,
+      failed: summary.failed,
+      deleted: summary.deleted,
+      details: summary.details.slice(0, 5)
     });
   });
 }

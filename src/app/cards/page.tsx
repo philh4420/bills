@@ -43,6 +43,7 @@ interface PushTestResponse {
   sent: number;
   failed: number;
   deleted: number;
+  details?: Array<{ endpoint: string; statusCode: number | null; message: string }>;
 }
 
 type CardRecord = CardData["cards"][number];
@@ -368,22 +369,37 @@ export default function CardsPage() {
         (await navigator.serviceWorker.getRegistration()) ||
         (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
 
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        const vapid = await authedRequest<VapidPublicKeyResponse>(
-          getIdToken,
-          "/api/notifications/vapid-public-key"
-        );
-        const vapidKey = urlBase64ToUint8Array(vapid.publicKey);
-        const applicationServerKey = vapidKey.buffer.slice(
-          vapidKey.byteOffset,
-          vapidKey.byteOffset + vapidKey.byteLength
-        ) as ArrayBuffer;
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey
-        });
+      const existingSubscription = await registration.pushManager.getSubscription();
+      if (existingSubscription) {
+        const endpoint = existingSubscription.endpoint;
+        try {
+          await existingSubscription.unsubscribe();
+        } catch {
+          // Continue and try to replace the subscription anyway.
+        }
+        try {
+          await authedRequest(getIdToken, "/api/notifications/subscriptions", {
+            method: "DELETE",
+            body: JSON.stringify({ endpoint })
+          });
+        } catch {
+          // Stale endpoint cleanup should not block re-subscribe.
+        }
       }
+
+      const vapid = await authedRequest<VapidPublicKeyResponse>(
+        getIdToken,
+        "/api/notifications/vapid-public-key"
+      );
+      const vapidKey = urlBase64ToUint8Array(vapid.publicKey);
+      const applicationServerKey = vapidKey.buffer.slice(
+        vapidKey.byteOffset,
+        vapidKey.byteOffset + vapidKey.byteLength
+      ) as ArrayBuffer;
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey
+      });
 
       const serialized = subscription.toJSON();
       if (!serialized.endpoint || !serialized.keys?.auth || !serialized.keys?.p256dh) {
@@ -457,13 +473,63 @@ export default function CardsPage() {
       const result = await authedRequest<PushTestResponse>(getIdToken, "/api/notifications/test", {
         method: "POST"
       });
-      if (result.sent > 0) {
+      if (result.sent > 0 && result.failed === 0) {
         setPushMessage(`Test notification sent (${result.sent}).`);
-      } else {
-        setPushMessage("No active push subscription found for this account.");
+        return;
       }
+
+      if (result.sent > 0 && result.failed > 0) {
+        setPushMessage(
+          `Partial success: sent ${result.sent}, failed ${result.failed}, cleaned ${result.deleted}.`
+        );
+        return;
+      }
+
+      if (result.failed > 0) {
+        const first = result.details?.[0];
+        const reason = first ? ` ${first.statusCode ?? "?"} ${first.message}` : "";
+        setPushMessage(
+          `Push failed for this subscription.${reason} Try Disable push, then Enable push again, then re-test.`
+        );
+        return;
+      }
+
+      setPushMessage("No active push subscription found for this account.");
     } catch (error) {
       setPushMessage(error instanceof Error ? error.message : "Failed to send test notification.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function sendLocalNotificationPreview() {
+    if (!pushSupported || typeof window === "undefined") {
+      setPushMessage("Notifications are not supported on this device/browser.");
+      return;
+    }
+
+    if (Notification.permission !== "granted") {
+      setPushMessage("Notification permission is not granted yet.");
+      return;
+    }
+
+    setPushBusy(true);
+    setPushMessage(null);
+
+    try {
+      const registration =
+        (await navigator.serviceWorker.getRegistration()) ||
+        (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+      await registration.showNotification("Bills App local notification test", {
+        body: "If this appears, OS permission is fine and push delivery is the remaining step.",
+        tag: `local-test-${Date.now()}`,
+        icon: "/icons/192",
+        badge: "/icons/192",
+        data: { url: "/cards" }
+      });
+      setPushMessage("Local notification triggered.");
+    } catch (error) {
+      setPushMessage(error instanceof Error ? error.message : "Failed to trigger local notification.");
     } finally {
       setPushBusy(false);
     }
@@ -833,6 +899,14 @@ export default function CardsPage() {
                 disabled={pushBusy || !pushSubscribed}
               >
                 Send test push
+              </button>
+              <button
+                className="button-secondary w-full sm:w-auto"
+                type="button"
+                onClick={() => sendLocalNotificationPreview()}
+                disabled={pushBusy || notificationPermission !== "granted"}
+              >
+                Local notify test
               </button>
             </div>
             {pushMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{pushMessage}</p> : null}
