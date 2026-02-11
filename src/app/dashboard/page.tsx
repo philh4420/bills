@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { ProtectedPage } from "@/components/protected-page";
@@ -9,6 +9,17 @@ import { SectionPanel } from "@/components/section-panel";
 import { authedRequest } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
 import { formatGBP } from "@/lib/util/format";
+
+interface TimelineEvent {
+  id: string;
+  type: "card-due" | "bill-due" | "adjustment";
+  title: string;
+  subtitle?: string;
+  date: string;
+  day: number;
+  amount: number;
+  category: string;
+}
 
 interface DashboardData {
   selectedMonth: string | null;
@@ -35,7 +46,36 @@ interface DashboardData {
     formulaVariantId: string;
     inferred: boolean;
   } | null;
+  alertSettings: {
+    lowMoneyLeftThreshold: number;
+    utilizationThresholdPercent: number;
+    dueReminderOffsets: number[];
+  };
+  alerts: Array<{
+    id: string;
+    type: "low-money-left" | "card-utilization" | "card-due";
+    severity: "info" | "warning" | "critical";
+    title: string;
+    message: string;
+    month: string;
+    actionUrl: string;
+    amount?: number;
+    cardId?: string;
+  }>;
+  timeline: {
+    month: string;
+    events: TimelineEvent[];
+  };
 }
+
+interface CalendarCell {
+  day: number | null;
+  events: TimelineEvent[];
+  outgoings: number;
+  incomings: number;
+}
+
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -46,9 +86,84 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function severityClass(severity: "info" | "warning" | "critical"): string {
+  if (severity === "critical") {
+    return "border border-red-200 bg-red-50 text-red-800";
+  }
+  if (severity === "warning") {
+    return "border border-amber-200 bg-amber-50 text-amber-800";
+  }
+  return "border border-blue-200 bg-blue-50 text-blue-800";
+}
+
+function timelineChipClass(type: TimelineEvent["type"]): string {
+  if (type === "card-due") {
+    return "calendar-event card-due";
+  }
+  if (type === "adjustment") {
+    return "calendar-event adjustment";
+  }
+  return "calendar-event bill-due";
+}
+
+function buildCalendar(month: string, events: TimelineEvent[]): CalendarCell[][] {
+  const match = month.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (!match) {
+    return [];
+  }
+
+  const year = Number.parseInt(match[1], 10);
+  const monthNumber = Number.parseInt(match[2], 10);
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const firstWeekday = (new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay() + 6) % 7;
+  const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+
+  const eventsByDay = new Map<number, TimelineEvent[]>();
+  events.forEach((event) => {
+    if (event.day < 1 || event.day > daysInMonth) {
+      return;
+    }
+    const existing = eventsByDay.get(event.day) || [];
+    existing.push(event);
+    eventsByDay.set(event.day, existing);
+  });
+
+  const cells: CalendarCell[] = [];
+  for (let index = 0; index < totalCells; index += 1) {
+    const day = index - firstWeekday + 1;
+    if (day < 1 || day > daysInMonth) {
+      cells.push({ day: null, events: [], outgoings: 0, incomings: 0 });
+      continue;
+    }
+
+    const dayEvents = (eventsByDay.get(day) || []).slice().sort((a, b) => {
+      const absoluteDiff = Math.abs(b.amount) - Math.abs(a.amount);
+      if (absoluteDiff !== 0) {
+        return absoluteDiff;
+      }
+      return a.title.localeCompare(b.title);
+    });
+    const outgoings = dayEvents.reduce((acc, event) => acc + (event.amount < 0 ? Math.abs(event.amount) : 0), 0);
+    const incomings = dayEvents.reduce((acc, event) => acc + (event.amount > 0 ? event.amount : 0), 0);
+    cells.push({ day, events: dayEvents, outgoings, incomings });
+  }
+
+  const weeks: CalendarCell[][] = [];
+  for (let index = 0; index < cells.length; index += 7) {
+    weeks.push(cells.slice(index, index + 7));
+  }
+  return weeks;
+}
+
 export default function DashboardPage() {
   const { getIdToken } = useAuth();
   const [month, setMonth] = useState<string | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState({
+    lowMoneyLeftThreshold: "0",
+    utilizationThresholdPercent: "0"
+  });
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dashboard", month],
@@ -58,6 +173,16 @@ export default function DashboardPage() {
         `/api/dashboard${month ? `?month=${encodeURIComponent(month)}` : ""}`
       )
   });
+
+  useEffect(() => {
+    if (!data?.alertSettings) {
+      return;
+    }
+    setSettingsDraft({
+      lowMoneyLeftThreshold: String(data.alertSettings.lowMoneyLeftThreshold),
+      utilizationThresholdPercent: String(data.alertSettings.utilizationThresholdPercent)
+    });
+  }, [data?.alertSettings]);
 
   const chartData = useMemo(() => {
     if (!data?.snapshot) {
@@ -73,6 +198,56 @@ export default function DashboardPage() {
       { name: "Left", value: data.snapshot.moneyLeft }
     ];
   }, [data]);
+
+  const calendarWeeks = useMemo(() => {
+    if (!data?.timeline?.month) {
+      return [];
+    }
+    return buildCalendar(data.timeline.month, data.timeline.events || []);
+  }, [data?.timeline]);
+
+  const heavyWeeks = useMemo(() => {
+    return calendarWeeks
+      .map((week, index) => ({
+        index,
+        totalOutgoings: week.reduce((acc, day) => acc + day.outgoings, 0)
+      }))
+      .filter((week) => week.totalOutgoings > 0)
+      .sort((a, b) => b.totalOutgoings - a.totalOutgoings)
+      .slice(0, 2);
+  }, [calendarWeeks]);
+
+  async function saveAlertSettings() {
+    const lowMoneyLeftThreshold = Number.parseFloat(settingsDraft.lowMoneyLeftThreshold);
+    const utilizationThresholdPercent = Number.parseFloat(settingsDraft.utilizationThresholdPercent);
+
+    if (!Number.isFinite(lowMoneyLeftThreshold) || lowMoneyLeftThreshold < 0) {
+      setSettingsMessage("Low money-left threshold must be a number >= 0.");
+      return;
+    }
+    if (!Number.isFinite(utilizationThresholdPercent) || utilizationThresholdPercent < 0) {
+      setSettingsMessage("Utilization threshold must be a number >= 0.");
+      return;
+    }
+
+    setSavingSettings(true);
+    setSettingsMessage(null);
+    try {
+      await authedRequest(getIdToken, "/api/alerts/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          lowMoneyLeftThreshold,
+          utilizationThresholdPercent
+        })
+      });
+      setSettingsMessage("Alert thresholds saved.");
+      await refetch();
+    } catch (requestError) {
+      setSettingsMessage(requestError instanceof Error ? requestError.message : "Failed to save alert settings.");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
 
   return (
     <ProtectedPage title="Dashboard">
@@ -145,15 +320,145 @@ export default function DashboardPage() {
                   Formula Variant: {data.snapshot.formulaVariantId}
                   {data.snapshot.inferred ? " (inferred month)" : ""}
                 </p>
-                {data.snapshot.cardSpendTotal === 0 ? (
-                  <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                    No card payments due for this month.
-                  </p>
-                ) : null}
               </div>
             </div>
           ) : (
             !isLoading && <p className="text-sm text-[var(--ink-soft)]">No snapshot data yet. Import workbook first.</p>
+          )}
+        </SectionPanel>
+
+        <SectionPanel
+          title="Smart alerts"
+          subtitle="In-app and push alerts for low money-left forecast, high card utilization, and upcoming due dates."
+          right={
+            <p className="text-sm text-[var(--ink-soft)]">
+              Due checks: {(data?.alertSettings?.dueReminderOffsets || []).join("/") || "7/3/1"} days
+            </p>
+          }
+        >
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+            <label className="block">
+              <span className="label">Low money-left threshold (GBP)</span>
+              <input
+                className="input mt-1"
+                type="number"
+                step="0.01"
+                value={settingsDraft.lowMoneyLeftThreshold}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    lowMoneyLeftThreshold: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="block">
+              <span className="label">Card utilization threshold (%)</span>
+              <input
+                className="input mt-1"
+                type="number"
+                step="0.1"
+                value={settingsDraft.utilizationThresholdPercent}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    utilizationThresholdPercent: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <button
+              type="button"
+              className="button-primary w-full xl:w-auto"
+              onClick={() => saveAlertSettings()}
+              disabled={savingSettings}
+            >
+              {savingSettings ? "Saving..." : "Save thresholds"}
+            </button>
+          </div>
+
+          {settingsMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{settingsMessage}</p> : null}
+
+          {(data?.alerts || []).length > 0 ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {data?.alerts.map((alert) => (
+                <div className="panel p-4" key={alert.id}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-[var(--ink-main)]">{alert.title}</p>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${severityClass(alert.severity)}`}>
+                      {alert.severity}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-[var(--ink-soft)]">{alert.message}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-[var(--ink-soft)]">No active alerts for the current thresholds.</p>
+          )}
+        </SectionPanel>
+
+        <SectionPanel
+          title="Monthly timeline"
+          subtitle="Calendar timeline for card due dates, bill dates, and one-off adjustments to spot heavy weeks."
+        >
+          {calendarWeeks.length === 0 ? (
+            <p className="text-sm text-[var(--ink-soft)]">No timeline data available for this month.</p>
+          ) : (
+            <div className="space-y-3">
+              {heavyWeeks.length > 0 ? (
+                <div className="calendar-heavy">
+                  {heavyWeeks.map((week) => (
+                    <span key={`heavy-week-${week.index}`} className="calendar-heavy-chip">
+                      Heavy week {week.index + 1}: {formatGBP(week.totalOutgoings)} outgoings
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="calendar-scroll">
+                <div className="calendar-canvas">
+                  <div className="calendar-weekdays">
+                    {WEEKDAY_LABELS.map((label) => (
+                      <p key={`weekday-${label}`} className="calendar-weekday">
+                        {label}
+                      </p>
+                    ))}
+                  </div>
+
+                  <div className="calendar-grid">
+                    {calendarWeeks.flat().map((cell, index) => (
+                      <div
+                        key={`calendar-cell-${index}`}
+                        className={`calendar-day ${cell.day ? "" : "is-empty"}`}
+                      >
+                        {cell.day ? (
+                          <>
+                            <div className="calendar-day-head">
+                              <p className="calendar-day-number">{cell.day}</p>
+                              {cell.outgoings > 0 ? (
+                                <p className="calendar-day-total">{formatGBP(cell.outgoings)}</p>
+                              ) : null}
+                            </div>
+                            <div className="calendar-day-events">
+                              {cell.events.slice(0, 3).map((event) => (
+                                <div key={event.id} className={timelineChipClass(event.type)}>
+                                  <p className="truncate font-medium">{event.title}</p>
+                                  {event.amount !== 0 ? <p className="truncate opacity-90">{formatGBP(event.amount)}</p> : null}
+                                </div>
+                              ))}
+                              {cell.events.length > 3 ? (
+                                <p className="calendar-more">+{cell.events.length - 3} more</p>
+                              ) : null}
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </SectionPanel>
       </div>

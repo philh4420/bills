@@ -5,6 +5,7 @@ import { DocumentData, QueryDocumentSnapshot, WriteBatch } from "firebase-admin/
 import { getFirebaseAdminFirestore } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import {
+  AlertSettings,
   CardAccount,
   ImportRecord,
   LineItem,
@@ -76,7 +77,11 @@ export async function listLineItems(
   collection: "houseBills" | "incomeItems" | "shoppingItems" | "myBills"
 ): Promise<LineItem[]> {
   const snap = await userDoc(uid).collection(COLLECTIONS[collection]).orderBy("name", "asc").get();
-  return mapDocs<LineItem>(snap.docs);
+  const defaultDueDay = collection === "incomeItems" ? null : 1;
+  return mapDocs<LineItem>(snap.docs).map((item) => ({
+    ...item,
+    dueDayOfMonth: item.dueDayOfMonth ?? defaultDueDay
+  }));
 }
 
 export async function listPurchasePlans(uid: string): Promise<PurchasePlan[]> {
@@ -120,7 +125,24 @@ export async function listMonthlyAdjustments(uid: string): Promise<MonthlyAdjust
     .orderBy("startMonth", "asc")
     .orderBy("name", "asc")
     .get();
-  return mapDocs<MonthlyAdjustment>(snap.docs);
+  return mapDocs<MonthlyAdjustment>(snap.docs).map((adjustment) => ({
+    ...adjustment,
+    dueDayOfMonth: adjustment.dueDayOfMonth ?? 1
+  }));
+}
+
+export async function getAlertSettings(uid: string): Promise<AlertSettings | null> {
+  const doc = await userDoc(uid).collection(COLLECTIONS.alertSettings).doc("default").get();
+  if (!doc.exists) {
+    return null;
+  }
+  return doc.data() as AlertSettings;
+}
+
+export async function upsertAlertSettings(uid: string, payload: Partial<AlertSettings>): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.alertSettings).doc("default").set(stripUndefined(payload), {
+    merge: true
+  });
 }
 
 export async function upsertCardAccount(

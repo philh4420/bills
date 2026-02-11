@@ -31,9 +31,12 @@ export async function createLineItemHandler(
   }
 
   const now = toIsoNow();
+  const defaultDueDay = collection === "incomeItems" ? null : 1;
   const id = await createLineItem(uid, collection, {
     name: parsed.data.name,
     amount: parsed.data.amount,
+    dueDayOfMonth:
+      parsed.data.dueDayOfMonth === undefined ? defaultDueDay : parsed.data.dueDayOfMonth,
     createdAt: now,
     updatedAt: now
   });

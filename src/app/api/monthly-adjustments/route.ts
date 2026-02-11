@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
       category: parsed.data.category,
       startMonth: parsed.data.startMonth,
       endMonth: parsed.data.endMonth,
+      dueDayOfMonth:
+        parsed.data.dueDayOfMonth === undefined ? 1 : parsed.data.dueDayOfMonth,
       createdAt: now,
       updatedAt: now
     });

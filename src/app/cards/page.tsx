@@ -656,7 +656,7 @@ export default function CardsPage() {
             </div>
             {pushMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{pushMessage}</p> : null}
             <p className="mt-2 text-xs text-[var(--ink-soft)]">
-              Reminders are sent daily from Vercel Cron for cards due in 7 days, 1 day, and today.
+              Reminders are sent daily from Vercel Cron for cards due in 7, 3, and 1 days.
             </p>
           </div>
         </SectionPanel>

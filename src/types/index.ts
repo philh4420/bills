@@ -46,6 +46,7 @@ export interface LineItem {
   id: string;
   name: string;
   amount: number;
+  dueDayOfMonth?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +60,7 @@ export interface MonthlyAdjustment {
   category: AdjustmentCategory;
   startMonth: MonthKey;
   endMonth?: MonthKey;
+  dueDayOfMonth?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -141,4 +143,48 @@ export interface DashboardResponse {
   snapshot: MonthSnapshot | null;
   cards: CardAccount[];
   monthlyPayments: MonthlyCardPayments | null;
+  alertSettings: AlertSettings;
+  alerts: SmartAlert[];
+  timeline: MonthTimeline;
+}
+
+export interface AlertSettings {
+  lowMoneyLeftThreshold: number;
+  utilizationThresholdPercent: number;
+  dueReminderOffsets: number[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type SmartAlertType = "low-money-left" | "card-utilization" | "card-due";
+export type SmartAlertSeverity = "info" | "warning" | "critical";
+
+export interface SmartAlert {
+  id: string;
+  type: SmartAlertType;
+  severity: SmartAlertSeverity;
+  title: string;
+  message: string;
+  month: MonthKey;
+  actionUrl: string;
+  amount?: number;
+  cardId?: string;
+}
+
+export type TimelineEventType = "card-due" | "bill-due" | "adjustment";
+
+export interface MonthTimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  title: string;
+  subtitle?: string;
+  date: string; // YYYY-MM-DD
+  day: number;
+  amount: number; // debit is negative, credit is positive
+  category: string;
+}
+
+export interface MonthTimeline {
+  month: MonthKey;
+  events: MonthTimelineEvent[];
 }

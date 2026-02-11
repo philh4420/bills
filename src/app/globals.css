@@ -215,3 +215,121 @@ tbody tr:hover {
 tbody tr:last-child td {
   border-bottom: none;
 }
+
+.calendar-heavy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.calendar-heavy-chip {
+  border: 1px solid rgba(215, 139, 86, 0.55);
+  background: linear-gradient(180deg, #fff8ef 0%, #ffe9cf 100%);
+  border-radius: 999px;
+  color: #8f3f10;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.32rem 0.66rem;
+}
+
+.calendar-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.4rem;
+}
+
+.calendar-canvas {
+  min-width: 980px;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.calendar-weekdays {
+  margin-top: 0.2rem;
+  margin-bottom: 0.4rem;
+}
+
+.calendar-weekday {
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.calendar-day {
+  min-height: 138px;
+  border: 1px solid rgba(184, 171, 150, 0.36);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.42rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.calendar-day.is-empty {
+  border-color: transparent;
+  background: transparent;
+}
+
+.calendar-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.calendar-day-number {
+  color: var(--ink-main);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.calendar-day-total {
+  color: var(--warn);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.calendar-day-events {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.calendar-event {
+  border-radius: 8px;
+  font-size: 0.66rem;
+  line-height: 1.2;
+  padding: 0.26rem 0.35rem;
+  border: 1px solid transparent;
+}
+
+.calendar-event.card-due {
+  border-color: rgba(15, 125, 111, 0.35);
+  background: rgba(15, 125, 111, 0.12);
+  color: #0f5e55;
+}
+
+.calendar-event.bill-due {
+  border-color: rgba(36, 61, 92, 0.2);
+  background: rgba(36, 61, 92, 0.08);
+  color: #21354f;
+}
+
+.calendar-event.adjustment {
+  border-color: rgba(37, 66, 143, 0.28);
+  background: rgba(37, 66, 143, 0.12);
+  color: #1f3a7b;
+}
+
+.calendar-more {
+  font-size: 0.66rem;
+  color: var(--ink-soft);
+}

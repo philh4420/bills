@@ -1,36 +1,23 @@
 import { NextRequest } from "next/server";
 
-import { computeUpcomingDueDate, formatDueDateLabel } from "@/lib/cards/due-date";
+import { buildSmartAlerts } from "@/lib/alerts/engine";
+import { normalizeAlertSettings, parseReminderOffsets } from "@/lib/alerts/settings";
+import { getDatePartsInTimeZone } from "@/lib/cards/due-date";
+import { computeCardMonthProjections, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
 import {
   deletePushSubscription,
+  getAlertSettings,
   listCardAccounts,
+  listMonthSnapshots,
+  listMonthlyPayments,
   listPushSubscriptions
 } from "@/lib/firestore/repository";
 import { getFirebaseAdminFirestore } from "@/lib/firebase/admin";
 import { sendWebPushNotification } from "@/lib/notifications/web-push";
+import { APP_TIMEZONE } from "@/lib/util/constants";
 import { jsonError, jsonOk } from "@/lib/util/http";
 
 export const runtime = "nodejs";
-
-const FALLBACK_REMINDER_OFFSETS = [7, 1, 0];
-
-function parseReminderOffsets(): number[] {
-  const raw = process.env.CARD_REMINDER_OFFSETS?.trim();
-  if (!raw) {
-    return FALLBACK_REMINDER_OFFSETS;
-  }
-
-  const parsed = raw
-    .split(",")
-    .map((entry) => Number.parseInt(entry.trim(), 10))
-    .filter((value) => Number.isInteger(value) && value >= 0 && value <= 31);
-
-  if (parsed.length === 0) {
-    return FALLBACK_REMINDER_OFFSETS;
-  }
-
-  return Array.from(new Set(parsed)).sort((a, b) => b - a);
-}
 
 function hasValidCronSecret(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET?.trim();
@@ -65,33 +52,36 @@ async function resolveOwnerUid(): Promise<string | null> {
   return snap.docs[0]?.id || null;
 }
 
-function createReminderPayload(
-  cards: Array<{ name: string; daysUntil: number; dueDate: string }>
-): { title: string; body: string } {
-  if (cards.length === 1) {
-    const card = cards[0];
-    const suffix = card.daysUntil === 0 ? "today" : `in ${card.daysUntil} day${card.daysUntil === 1 ? "" : "s"}`;
+function createSmartAlertPayload(alerts: ReturnType<typeof buildSmartAlerts>): { title: string; body: string; url: string } {
+  const dueAlerts = alerts.filter((alert) => alert.type === "card-due");
+  const utilizationAlerts = alerts.filter((alert) => alert.type === "card-utilization");
+  const lowMoneyLeftAlert = alerts.find((alert) => alert.type === "low-money-left");
+
+  if (dueAlerts.length === 1 && alerts.length === 1) {
     return {
-      title: `${card.name} payment due ${suffix}`,
-      body: `Due on ${formatDueDateLabel(card.dueDate)}.`
+      title: dueAlerts[0].title,
+      body: dueAlerts[0].message,
+      url: "/cards"
     };
   }
 
-  const headline = cards
-    .slice(0, 3)
-    .map((card) => {
-      if (card.daysUntil === 0) {
-        return `${card.name} today`;
-      }
-      return `${card.name} in ${card.daysUntil}d`;
-    })
-    .join(", ");
+  const summaryParts: string[] = [];
+  if (dueAlerts.length > 0) {
+    summaryParts.push(`${dueAlerts.length} due soon`);
+  }
+  if (utilizationAlerts.length > 0) {
+    summaryParts.push(`${utilizationAlerts.length} high utilization`);
+  }
+  if (lowMoneyLeftAlert) {
+    summaryParts.push("money-left low");
+  }
 
-  const extra = cards.length > 3 ? ` +${cards.length - 3} more` : "";
-
+  const headline = summaryParts.length > 0 ? summaryParts.join(" • ") : `${alerts.length} financial alerts`;
+  const topMessages = alerts.slice(0, 2).map((alert) => alert.title).join(" | ");
   return {
-    title: `${cards.length} card payments coming up`,
-    body: `${headline}${extra}`
+    title: `Bills alerts: ${headline}`,
+    body: topMessages || "Review your dashboard alerts.",
+    url: lowMoneyLeftAlert ? "/dashboard" : dueAlerts.length > 0 ? "/cards" : "/dashboard"
   };
 }
 
@@ -110,10 +100,55 @@ async function runReminderJob(request: NextRequest) {
     return jsonError(500, "Owner account is not configured.");
   }
 
-  const [cards, subscriptions] = await Promise.all([
+  const [cards, subscriptions, monthlyPayments, snapshots, persistedAlertSettings] = await Promise.all([
     listCardAccounts(ownerUid),
-    listPushSubscriptions(ownerUid)
+    listPushSubscriptions(ownerUid),
+    listMonthlyPayments(ownerUid),
+    listMonthSnapshots(ownerUid),
+    getAlertSettings(ownerUid)
   ]);
+
+  const reminderOffsets = parseReminderOffsets(process.env.CARD_REMINDER_OFFSETS);
+  const settings = normalizeAlertSettings(persistedAlertSettings, reminderOffsets);
+  const now = new Date();
+  const todayParts = getDatePartsInTimeZone(now, APP_TIMEZONE);
+  const currentMonth = `${String(todayParts.year).padStart(4, "0")}-${String(todayParts.month).padStart(2, "0")}`;
+
+  const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
+  const currentMonthPayment = timelinePayments.find((entry) => entry.month === currentMonth) || null;
+  const currentMonthSnapshot = snapshots.find((entry) => entry.month === currentMonth) || null;
+  const currentProjection = computeCardMonthProjections(cards, timelinePayments).find(
+    (entry) => entry.month === currentMonth
+  );
+  const projectedClosingByCardId: Record<string, number> = currentProjection
+    ? Object.fromEntries(
+        Object.entries(currentProjection.entries).map(([cardId, projection]) => [
+          cardId,
+          projection.closingBalance
+        ])
+      )
+    : {};
+
+  const alerts = buildSmartAlerts({
+    selectedMonth: currentMonth,
+    snapshot: currentMonthSnapshot,
+    cards,
+    settings,
+    projectedClosingByCardId,
+    paymentByCardIdForCurrentMonth: currentMonthPayment?.byCardId || {},
+    now
+  });
+
+  if (alerts.length === 0) {
+    return jsonOk({
+      ok: true,
+      sent: 0,
+      failed: 0,
+      deleted: 0,
+      reason: "No smart alerts triggered today.",
+      reminderOffsets
+    });
+  }
 
   if (subscriptions.length === 0) {
     return jsonOk({
@@ -121,50 +156,30 @@ async function runReminderJob(request: NextRequest) {
       sent: 0,
       failed: 0,
       deleted: 0,
-      reason: "No push subscriptions saved."
+      reason: "No push subscriptions saved.",
+      reminderOffsets,
+      alerts: alerts.map((alert) => ({
+        id: alert.id,
+        type: alert.type,
+        severity: alert.severity,
+        title: alert.title
+      }))
     });
   }
 
-  const reminderOffsets = parseReminderOffsets();
-  const reminderSet = new Set(reminderOffsets);
-
-  const dueCards = cards
-    .filter((card) => Number.isInteger(card.dueDayOfMonth) && (card.dueDayOfMonth ?? 0) > 0)
-    .map((card) => {
-      const due = computeUpcomingDueDate(card.dueDayOfMonth ?? 1);
-      return {
-        id: card.id,
-        name: card.name,
-        dueDayOfMonth: card.dueDayOfMonth ?? null,
-        dueDate: due.isoDate,
-        daysUntil: due.daysUntil
-      };
-    })
-    .filter((card) => reminderSet.has(card.daysUntil))
-    .sort((a, b) => a.daysUntil - b.daysUntil || a.name.localeCompare(b.name));
-
-  if (dueCards.length === 0) {
-    return jsonOk({
-      ok: true,
-      sent: 0,
-      failed: 0,
-      deleted: 0,
-      reason: "No cards match reminder offsets today.",
-      reminderOffsets
-    });
-  }
-
-  const payload = createReminderPayload(dueCards);
-  const nowTag = new Date().toISOString().slice(0, 10);
+  const payload = createSmartAlertPayload(alerts);
+  const nowTag = now.toISOString().slice(0, 10);
   const fullPayload = {
     ...payload,
-    tag: `cards-due-${nowTag}`,
-    url: "/cards",
-    cards: dueCards.map((card) => ({
-      id: card.id,
-      name: card.name,
-      dueDate: card.dueDate,
-      daysUntil: card.daysUntil
+    tag: `smart-alerts-${nowTag}`,
+    url: payload.url,
+    alerts: alerts.map((alert) => ({
+      id: alert.id,
+      type: alert.type,
+      severity: alert.severity,
+      title: alert.title,
+      message: alert.message,
+      actionUrl: alert.actionUrl
     }))
   };
 
@@ -206,10 +221,11 @@ async function runReminderJob(request: NextRequest) {
     sent,
     failed,
     deleted,
-    dueCards: dueCards.map((card) => ({
-      name: card.name,
-      dueDate: card.dueDate,
-      daysUntil: card.daysUntil
+    alerts: alerts.map((alert) => ({
+      id: alert.id,
+      type: alert.type,
+      severity: alert.severity,
+      title: alert.title
     })),
     reminderOffsets
   });

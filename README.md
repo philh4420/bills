@@ -53,7 +53,7 @@ npx web-push generate-vapid-keys
 - `WEB_PUSH_VAPID_PUBLIC_KEY`
 - `WEB_PUSH_VAPID_PRIVATE_KEY`
 - `CRON_SECRET`
-- optional `CARD_REMINDER_OFFSETS` (default `7,1,0`)
+- optional `CARD_REMINDER_OFFSETS` (default `7,3,1`)
 
 3. Keep `vercel.json` cron enabled:
 - `GET /api/cron/card-reminders` runs daily at `0 8 * * *` (UTC).
@@ -63,11 +63,13 @@ npx web-push generate-vapid-keys
 - Set `Due day` for cards on `/cards`.
 - Enable push notifications in `/cards` -> `Push reminders`.
 - On iOS, install from Safari to Home Screen and allow notifications.
+- Configure smart alert thresholds on `/dashboard`.
 
 ## API routes
 
 - `POST /api/import/bills-xlsx`
 - `GET /api/dashboard?month=YYYY-MM`
+- `GET|PUT /api/alerts/settings`
 - `GET /api/cards`
 - `PATCH /api/cards/:cardId`
 - `GET /api/monthly-payments?month=YYYY-MM`

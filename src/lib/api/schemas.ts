@@ -31,12 +31,14 @@ export const pushSubscriptionDeleteSchema = z.object({
 
 export const lineItemCreateSchema = z.object({
   name: z.string().trim().min(1),
-  amount: z.number().nonnegative()
+  amount: z.number().nonnegative(),
+  dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()
 });
 
 export const lineItemPatchSchema = z.object({
   name: z.string().trim().min(1).optional(),
-  amount: z.number().nonnegative().optional()
+  amount: z.number().nonnegative().optional(),
+  dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()
 });
 
 export const purchaseCreateSchema = z.object({
@@ -69,7 +71,8 @@ export const monthlyAdjustmentCreateSchema = z.object({
   amount: z.number().nonnegative(),
   category: adjustmentCategorySchema,
   startMonth: monthKeySchema,
-  endMonth: monthKeySchema.optional()
+  endMonth: monthKeySchema.optional(),
+  dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()
 });
 
 export const monthlyAdjustmentPatchSchema = z.object({
@@ -77,5 +80,11 @@ export const monthlyAdjustmentPatchSchema = z.object({
   amount: z.number().nonnegative().optional(),
   category: adjustmentCategorySchema.optional(),
   startMonth: monthKeySchema.optional(),
-  endMonth: monthKeySchema.nullable().optional()
+  endMonth: monthKeySchema.nullable().optional(),
+  dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()
+});
+
+export const alertSettingsPutSchema = z.object({
+  lowMoneyLeftThreshold: z.number().nonnegative(),
+  utilizationThresholdPercent: z.number().min(0).max(1000)
 });

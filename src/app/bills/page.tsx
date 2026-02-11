@@ -13,6 +13,7 @@ interface Item {
   id: string;
   name: string;
   amount: number;
+  dueDayOfMonth?: number | null;
 }
 
 interface MonthlyAdjustment {
@@ -22,6 +23,20 @@ interface MonthlyAdjustment {
   category: "income" | "houseBills" | "shopping" | "myBills";
   startMonth: string;
   endMonth?: string;
+  dueDayOfMonth?: number | null;
+}
+
+const DUE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
+
+function parseDueDayInput(value: string): number | null {
+  if (!value.trim()) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 31) {
+    return null;
+  }
+  return parsed;
 }
 
 function normalizeMonthInput(value: string): string | null {
@@ -55,8 +70,10 @@ function LineItemCollection({
   endpoint: "/api/house-bills" | "/api/income" | "/api/shopping" | "/api/my-bills";
   getIdToken: () => Promise<string | null>;
 }) {
+  const supportsDueDay = endpoint !== "/api/income";
   const [newName, setNewName] = useState("");
   const [newAmount, setNewAmount] = useState("0");
+  const [newDueDay, setNewDueDay] = useState("1");
   const [drafts, setDrafts] = useState<Record<string, Item>>({});
   const [message, setMessage] = useState<string | null>(null);
 
@@ -68,10 +85,13 @@ function LineItemCollection({
   useEffect(() => {
     const next: Record<string, Item> = {};
     (query.data?.items || []).forEach((item) => {
-      next[item.id] = item;
+      next[item.id] = {
+        ...item,
+        dueDayOfMonth: supportsDueDay ? (item.dueDayOfMonth ?? 1) : null
+      };
     });
     setDrafts(next);
-  }, [query.data]);
+  }, [query.data, supportsDueDay]);
 
   const items = query.data?.items || [];
   const total = items.reduce((acc, item) => acc + item.amount, 0);
@@ -82,12 +102,18 @@ function LineItemCollection({
     }
 
     setMessage(null);
+    const dueDay = supportsDueDay ? parseDueDayInput(newDueDay) : null;
     await authedRequest(getIdToken, endpoint, {
       method: "POST",
-      body: JSON.stringify({ name: newName.trim(), amount: Number(newAmount) })
+      body: JSON.stringify({
+        name: newName.trim(),
+        amount: Number(newAmount),
+        dueDayOfMonth: supportsDueDay ? dueDay : undefined
+      })
     });
     setNewName("");
     setNewAmount("0");
+    setNewDueDay("1");
     setMessage("Created item");
     await query.refetch();
   }
@@ -101,7 +127,11 @@ function LineItemCollection({
     setMessage(null);
     await authedRequest(getIdToken, `${endpoint}/${id}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: item.name, amount: item.amount })
+      body: JSON.stringify({
+        name: item.name,
+        amount: item.amount,
+        dueDayOfMonth: supportsDueDay ? (item.dueDayOfMonth ?? null) : undefined
+      })
     });
     setMessage("Saved item");
     await query.refetch();
@@ -165,6 +195,31 @@ function LineItemCollection({
                     }
                   />
                 </div>
+                {supportsDueDay ? (
+                  <div>
+                    <p className="label">Due day</p>
+                    <select
+                      className="input mt-1"
+                      value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [item.id]: {
+                            ...prev[item.id],
+                            dueDayOfMonth: parseDueDayInput(event.target.value)
+                          }
+                        }))
+                      }
+                    >
+                      <option value="">Not set</option>
+                      {DUE_DAY_OPTIONS.map((day) => (
+                        <option key={`mobile-line-due-${item.id}-${day}`} value={day}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 <div className="flex items-end text-xs text-[var(--ink-soft)]">
                   Monthly value: {formatGBP(draft.amount)}
                 </div>
@@ -201,6 +256,22 @@ function LineItemCollection({
                 onChange={(event) => setNewAmount(event.target.value)}
               />
             </div>
+            {supportsDueDay ? (
+              <div>
+                <select
+                  className="input"
+                  value={newDueDay}
+                  onChange={(event) => setNewDueDay(event.target.value)}
+                >
+                  <option value="">Due day</option>
+                  {DUE_DAY_OPTIONS.map((day) => (
+                    <option key={`new-line-due-${endpoint}-${day}`} value={day}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <div className="sm:self-end">
               <button className="button-primary w-full sm:w-auto" type="button" onClick={() => addItem()}>
                 Add
@@ -216,6 +287,7 @@ function LineItemCollection({
             <tr>
               <th>Name</th>
               <th>Amount</th>
+              {supportsDueDay ? <th>Due day</th> : null}
               <th>Actions</th>
             </tr>
           </thead>
@@ -254,6 +326,30 @@ function LineItemCollection({
                     }
                   />
                 </td>
+                {supportsDueDay ? (
+                  <td>
+                    <select
+                      className="input"
+                      value={drafts[item.id]?.dueDayOfMonth ? String(drafts[item.id]?.dueDayOfMonth) : ""}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [item.id]: {
+                            ...prev[item.id],
+                            dueDayOfMonth: parseDueDayInput(event.target.value)
+                          }
+                        }))
+                      }
+                    >
+                      <option value="">Not set</option>
+                      {DUE_DAY_OPTIONS.map((day) => (
+                        <option key={`desktop-line-due-${item.id}-${day}`} value={day}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                ) : null}
                 <td>
                   <div className="flex gap-2">
                     <button className="button-secondary" type="button" onClick={() => saveItem(item.id)}>
@@ -285,6 +381,18 @@ function LineItemCollection({
                   onChange={(event) => setNewAmount(event.target.value)}
                 />
               </td>
+              {supportsDueDay ? (
+                <td>
+                  <select className="input" value={newDueDay} onChange={(event) => setNewDueDay(event.target.value)}>
+                    <option value="">Due day</option>
+                    {DUE_DAY_OPTIONS.map((day) => (
+                      <option key={`desktop-new-line-due-${endpoint}-${day}`} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              ) : null}
               <td>
                 <button className="button-primary" type="button" onClick={() => addItem()}>
                   Add
@@ -308,7 +416,8 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
     amount: "0",
     category: "houseBills" as MonthlyAdjustment["category"],
     startMonth: "2026-01",
-    endMonth: ""
+    endMonth: "",
+    dueDayOfMonth: "1"
   });
 
   const query = useQuery({
@@ -320,7 +429,10 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
   useEffect(() => {
     const next: Record<string, MonthlyAdjustment> = {};
     (query.data?.adjustments || []).forEach((item) => {
-      next[item.id] = item;
+      next[item.id] = {
+        ...item,
+        dueDayOfMonth: item.dueDayOfMonth ?? 1
+      };
     });
     setDrafts(next);
   }, [query.data]);
@@ -355,7 +467,8 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
           amount: Number(newItem.amount),
           category: newItem.category,
           startMonth,
-          endMonth: endMonth || undefined
+          endMonth: endMonth || undefined,
+          dueDayOfMonth: parseDueDayInput(newItem.dueDayOfMonth)
         })
       });
 
@@ -364,7 +477,8 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
         amount: "0",
         category: "houseBills",
         startMonth: "2026-01",
-        endMonth: ""
+        endMonth: "",
+        dueDayOfMonth: "1"
       });
       setMessage("Created monthly adjustment");
       await query.refetch();
@@ -400,7 +514,8 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
           amount: item.amount,
           category: item.category,
           startMonth,
-          endMonth: endMonth || null
+          endMonth: endMonth || null,
+          dueDayOfMonth: item.dueDayOfMonth ?? null
         })
       });
       setMessage("Saved monthly adjustment");
@@ -515,6 +630,26 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
                     }
                   />
                 </div>
+                <div>
+                  <p className="label">Due day</p>
+                  <select
+                    className="input mt-1"
+                    value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], dueDayOfMonth: parseDueDayInput(event.target.value) }
+                      }))
+                    }
+                  >
+                    <option value="">Not set</option>
+                    {DUE_DAY_OPTIONS.map((day) => (
+                      <option key={`mobile-adjustment-due-${item.id}-${day}`} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => saveItem(item.id)}>
@@ -583,6 +718,25 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
                 onChange={(event) => setNewItem((prev) => ({ ...prev, endMonth: event.target.value }))}
               />
             </div>
+            <div>
+              <select
+                className="input"
+                value={newItem.dueDayOfMonth}
+                onChange={(event) =>
+                  setNewItem((prev) => ({
+                    ...prev,
+                    dueDayOfMonth: event.target.value
+                  }))
+                }
+              >
+                <option value="">Due day</option>
+                {DUE_DAY_OPTIONS.map((day) => (
+                  <option key={`new-adjustment-due-mobile-${day}`} value={day}>
+                    {day}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="sm:col-span-2">
               <button className="button-primary w-full sm:w-auto" type="button" onClick={() => createItem()}>
                 Add
@@ -601,6 +755,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
               <th>Amount</th>
               <th>Start</th>
               <th>End</th>
+              <th>Due day</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -682,6 +837,25 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
                   />
                 </td>
                 <td>
+                  <select
+                    className="input"
+                    value={drafts[item.id]?.dueDayOfMonth ? String(drafts[item.id]?.dueDayOfMonth) : ""}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], dueDayOfMonth: parseDueDayInput(event.target.value) }
+                      }))
+                    }
+                  >
+                    <option value="">Not set</option>
+                    {DUE_DAY_OPTIONS.map((day) => (
+                      <option key={`desktop-adjustment-due-${item.id}-${day}`} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
                   <div className="flex gap-2">
                     <button className="button-secondary" type="button" onClick={() => saveItem(item.id)}>
                       Save
@@ -748,6 +922,25 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
                   onChange={(event) => setNewItem((prev) => ({ ...prev, endMonth: event.target.value }))}
                   placeholder="YYYY-MM"
                 />
+              </td>
+              <td>
+                <select
+                  className="input"
+                  value={newItem.dueDayOfMonth}
+                  onChange={(event) =>
+                    setNewItem((prev) => ({
+                      ...prev,
+                      dueDayOfMonth: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">Due day</option>
+                  {DUE_DAY_OPTIONS.map((day) => (
+                    <option key={`desktop-adjustment-new-due-${day}`} value={day}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
               </td>
               <td>
                 <button className="button-primary" type="button" onClick={() => createItem()}>
