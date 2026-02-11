@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { MobileEditDrawer } from "@/components/mobile-edit-drawer";
 import { ProtectedPage } from "@/components/protected-page";
@@ -40,6 +40,7 @@ interface VapidPublicKeyResponse {
 
 interface PushTestResponse {
   ok: boolean;
+  targeted?: number;
   sent: number;
   failed: number;
   deleted: number;
@@ -161,6 +162,7 @@ function isStandaloneDisplayMode(): boolean {
 
 export default function CardsPage() {
   const { getIdToken } = useAuth();
+  const getIdTokenRef = useRef(getIdToken);
   const [month, setMonth] = useState<string>("");
   const [message, setMessage] = useState<string | null>(null);
   const [cardDrafts, setCardDrafts] = useState<
@@ -171,6 +173,8 @@ export default function CardsPage() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
   const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [serverSubscriptionCount, setServerSubscriptionCount] = useState(0);
+  const [currentPushEndpoint, setCurrentPushEndpoint] = useState<string | null>(null);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<string>("default");
   const [isInstalledApp, setIsInstalledApp] = useState(false);
@@ -244,6 +248,10 @@ export default function CardsPage() {
   }, [activePayment]);
 
   useEffect(() => {
+    getIdTokenRef.current = getIdToken;
+  }, [getIdToken]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -294,10 +302,41 @@ export default function CardsPage() {
         (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
       const subscription = await registration.pushManager.getSubscription();
       setPushSubscribed(Boolean(subscription));
+      setCurrentPushEndpoint(subscription?.endpoint ?? null);
+      try {
+        const server = await authedRequest<{
+          subscriptions: Array<{ id: string; endpoint: string; updatedAt?: string }>
+        }>(getIdTokenRef.current, "/api/notifications/subscriptions");
+        setServerSubscriptionCount(server.subscriptions.length);
+      } catch {
+        setServerSubscriptionCount(0);
+      }
     })();
 
     return cleanup;
   }, []);
+
+  async function refreshPushStateFromDeviceAndServer() {
+    if (!pushSupported || typeof window === "undefined") {
+      return;
+    }
+
+    const registration =
+      (await navigator.serviceWorker.getRegistration()) ||
+      (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+    const subscription = await registration.pushManager.getSubscription();
+    setPushSubscribed(Boolean(subscription));
+    setCurrentPushEndpoint(subscription?.endpoint ?? null);
+
+    try {
+      const server = await authedRequest<{
+        subscriptions: Array<{ id: string; endpoint: string; updatedAt?: string }>
+      }>(getIdToken, "/api/notifications/subscriptions");
+      setServerSubscriptionCount(server.subscriptions.length);
+    } catch {
+      setServerSubscriptionCount(0);
+    }
+  }
 
   async function saveCard(cardId: string) {
     setMessage(null);
@@ -423,6 +462,7 @@ export default function CardsPage() {
 
       setPushSubscribed(true);
       setPushMessage("Push reminders enabled.");
+      await refreshPushStateFromDeviceAndServer();
     } catch (error) {
       setPushSubscribed(false);
       setPushMessage(error instanceof Error ? error.message : "Failed to enable push reminders.");
@@ -453,6 +493,7 @@ export default function CardsPage() {
 
       setPushSubscribed(false);
       setPushMessage("Push reminders disabled.");
+      await refreshPushStateFromDeviceAndServer();
     } catch (error) {
       setPushMessage(error instanceof Error ? error.message : "Failed to disable push reminders.");
     } finally {
@@ -470,11 +511,25 @@ export default function CardsPage() {
     setPushMessage(null);
 
     try {
+      const registration =
+        (await navigator.serviceWorker.getRegistration()) ||
+        (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+      const subscription = await registration.pushManager.getSubscription();
+      const endpoint = subscription?.endpoint;
+
+      if (!endpoint) {
+        setPushSubscribed(false);
+        setCurrentPushEndpoint(null);
+        setPushMessage("No active subscription found on this device. Enable push reminders again.");
+        return;
+      }
+
       const result = await authedRequest<PushTestResponse>(getIdToken, "/api/notifications/test", {
-        method: "POST"
+        method: "POST",
+        body: JSON.stringify({ endpoint })
       });
       if (result.sent > 0 && result.failed === 0) {
-        setPushMessage(`Test notification sent (${result.sent}).`);
+        setPushMessage(`Test notification sent to this device (${result.sent}/${result.targeted ?? 1}).`);
         return;
       }
 
@@ -862,6 +917,10 @@ export default function CardsPage() {
               Installed app mode:{" "}
               <span className="font-medium text-[var(--ink-main)]">{isInstalledApp ? "Yes" : "No"}</span>
             </p>
+            <p className="text-xs text-[var(--ink-soft)]">
+              Saved subscriptions:{" "}
+              <span className="font-medium text-[var(--ink-main)]">{serverSubscriptionCount}</span>
+            </p>
             <p className="text-sm text-[var(--ink-soft)]">
               Status:{" "}
               <span className="font-medium text-[var(--ink-main)]">
@@ -910,6 +969,11 @@ export default function CardsPage() {
               </button>
             </div>
             {pushMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{pushMessage}</p> : null}
+            {currentPushEndpoint ? (
+              <p className="mt-2 text-[11px] text-[var(--ink-soft)]">
+                Current device endpoint: …{currentPushEndpoint.slice(-18)}
+              </p>
+            ) : null}
             {isAppleMobileDevice && !isInstalledApp ? (
               <p className="mt-2 text-xs text-[var(--ink-soft)]">
                 iPhone/iPad web push only works in the installed Home Screen app.

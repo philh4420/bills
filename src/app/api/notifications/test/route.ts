@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { z } from "zod";
 
 import { withOwnerAuth } from "@/lib/api/handler";
 import {
@@ -13,15 +14,37 @@ export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   return withOwnerAuth(request, async ({ uid }) => {
+    let targetEndpoint: string | null = null;
+    try {
+      const parsed = z
+        .object({
+          endpoint: z.url().optional()
+        })
+        .safeParse(await request.json());
+      if (parsed.success) {
+        targetEndpoint = parsed.data.endpoint || null;
+      }
+    } catch {
+      // Body is optional for this endpoint.
+    }
+
     const subscriptions = await listPushSubscriptions(uid);
     if (subscriptions.length === 0) {
       return jsonError(400, "No push subscriptions saved.");
     }
 
+    const targetSubscriptions = targetEndpoint
+      ? subscriptions.filter((entry) => entry.endpoint === targetEndpoint)
+      : subscriptions;
+
+    if (targetSubscriptions.length === 0) {
+      return jsonError(404, "The current device push subscription was not found on the server.");
+    }
+
     const timestamp = toIsoNow();
 
     const results = await Promise.all(
-      subscriptions.map(async (subscription) => {
+      targetSubscriptions.map(async (subscription) => {
         try {
           await sendWebPushNotification(
             {
@@ -100,6 +123,7 @@ export async function POST(request: NextRequest) {
 
     return jsonOk({
       ok: true,
+      targeted: targetSubscriptions.length,
       sent: summary.sent,
       failed: summary.failed,
       deleted: summary.deleted,
