@@ -125,7 +125,7 @@ function LineItemCollection({
       {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
       {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
 
-      <div className="space-y-3 md:hidden">
+      <div className="space-y-3 lg:hidden">
         {items.map((item) => {
           const draft = drafts[item.id] || item;
           return (
@@ -210,7 +210,7 @@ function LineItemCollection({
         </div>
       </div>
 
-      <div className="table-wrap hidden md:block">
+      <div className="table-wrap hidden lg:block">
         <table>
           <thead>
             <tr>
@@ -432,7 +432,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
       {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
 
-      <div className="space-y-3 md:hidden">
+      <div className="space-y-3 lg:hidden">
         {adjustments.map((item) => {
           const draft = drafts[item.id] || item;
           return (
@@ -592,7 +592,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
         </div>
       </div>
 
-      <div className="table-wrap hidden md:block">
+      <div className="table-wrap hidden lg:block">
         <table>
           <thead>
             <tr>
