@@ -65,11 +65,13 @@ export const monthlyPaymentsPutSchema = z.object({
 });
 
 export const adjustmentCategorySchema = z.enum(["income", "houseBills", "shopping", "myBills"]);
+export const incomeSourceTypeSchema = z.enum(["loan", "bonus", "other"]);
 
 export const monthlyAdjustmentCreateSchema = z.object({
   name: z.string().trim().min(1),
   amount: z.number().nonnegative(),
   category: adjustmentCategorySchema,
+  sourceType: incomeSourceTypeSchema.optional(),
   startMonth: monthKeySchema,
   endMonth: monthKeySchema.optional(),
   dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()
@@ -79,6 +81,7 @@ export const monthlyAdjustmentPatchSchema = z.object({
   name: z.string().trim().min(1).optional(),
   amount: z.number().nonnegative().optional(),
   category: adjustmentCategorySchema.optional(),
+  sourceType: incomeSourceTypeSchema.optional(),
   startMonth: monthKeySchema.optional(),
   endMonth: monthKeySchema.nullable().optional(),
   dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()

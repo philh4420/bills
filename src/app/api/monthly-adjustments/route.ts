@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       name: parsed.data.name,
       amount: parsed.data.amount,
       category: parsed.data.category,
+      sourceType: parsed.data.sourceType ?? (parsed.data.category === "income" ? "other" : undefined),
       startMonth: parsed.data.startMonth,
       endMonth: parsed.data.endMonth,
       dueDayOfMonth:

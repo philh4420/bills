@@ -52,12 +52,14 @@ export interface LineItem {
 }
 
 export type AdjustmentCategory = "income" | "houseBills" | "shopping" | "myBills";
+export type IncomeSourceType = "loan" | "bonus" | "other";
 
 export interface MonthlyAdjustment {
   id: string;
   name: string;
   amount: number;
   category: AdjustmentCategory;
+  sourceType?: IncomeSourceType;
   startMonth: MonthKey;
   endMonth?: MonthKey;
   dueDayOfMonth?: number | null;
