@@ -8,7 +8,8 @@ export const COLLECTIONS = {
   monthlyAdjustments: "monthlyAdjustments",
   purchasePlans: "purchasePlans",
   monthSnapshots: "monthSnapshots",
-  imports: "imports"
+  imports: "imports",
+  pushSubscriptions: "pushSubscriptions"
 } as const;
 
 export type CollectionKey = keyof typeof COLLECTIONS;

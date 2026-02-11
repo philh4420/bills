@@ -16,6 +16,17 @@ export interface CardAccount {
   limit: number;
   usedLimit: number;
   interestRateApr: number;
+  dueDayOfMonth?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PushSubscriptionRecord {
+  id: string;
+  endpoint: string;
+  auth: string;
+  p256dh: string;
+  userAgent?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,7 +104,9 @@ export interface ImportRecord {
 }
 
 export interface ImportedWorkbookSnapshot {
-  cardAccounts: Array<Pick<CardAccount, "name" | "limit" | "usedLimit" | "interestRateApr">>;
+  cardAccounts: Array<
+    Pick<CardAccount, "name" | "limit" | "usedLimit" | "interestRateApr" | "dueDayOfMonth">
+  >;
   monthlyPayments: Array<{
     month: MonthKey;
     byCardName: Record<string, number>;

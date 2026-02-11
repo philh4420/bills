@@ -7,11 +7,19 @@ import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
 import { authedRequest } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
+import { computeUpcomingDueDate, formatDueDateLabel } from "@/lib/cards/due-date";
 import { computeCardMonthProjections } from "@/lib/formulas/engine";
 import { formatGBP } from "@/lib/util/format";
 
 interface CardData {
-  cards: Array<{ id: string; name: string; limit: number; usedLimit: number; interestRateApr: number }>;
+  cards: Array<{
+    id: string;
+    name: string;
+    limit: number;
+    usedLimit: number;
+    interestRateApr: number;
+    dueDayOfMonth?: number | null;
+  }>;
 }
 
 interface MonthlyList {
@@ -25,15 +33,68 @@ interface MonthlyList {
   }>;
 }
 
+interface VapidPublicKeyResponse {
+  publicKey: string;
+}
+
+function parseDueDayInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed)) {
+    return null;
+  }
+
+  return Math.max(1, Math.min(31, parsed));
+}
+
+function toDueSummary(dueDayOfMonth?: number | null): string {
+  if (!dueDayOfMonth || dueDayOfMonth < 1) {
+    return "No due date";
+  }
+
+  const due = computeUpcomingDueDate(dueDayOfMonth);
+  if (due.daysUntil === 0) {
+    return `Due today (${formatDueDateLabel(due.isoDate)})`;
+  }
+
+  if (due.daysUntil === 1) {
+    return `Due tomorrow (${formatDueDateLabel(due.isoDate)})`;
+  }
+
+  return `Due in ${due.daysUntil} days (${formatDueDateLabel(due.isoDate)})`;
+}
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+
+  return outputArray;
+}
+
 export default function CardsPage() {
   const { getIdToken } = useAuth();
   const [month, setMonth] = useState<string>("");
   const [message, setMessage] = useState<string | null>(null);
   const [cardDrafts, setCardDrafts] = useState<
-    Record<string, { limit: number; usedLimit: number; interestRateApr: number }>
+    Record<string, { limit: number; usedLimit: number; interestRateApr: number; dueDayOfMonth: number | null }>
   >({});
   const [paymentDraft, setPaymentDraft] = useState<Record<string, number>>({});
   const [formulaVariantId, setFormulaVariantId] = useState("money-left-standard");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<string>("default");
 
   const cardsQuery = useQuery({
     queryKey: ["cards"],
@@ -77,12 +138,16 @@ export default function CardsPage() {
       return;
     }
 
-    const next: Record<string, { limit: number; usedLimit: number; interestRateApr: number }> = {};
+    const next: Record<
+      string,
+      { limit: number; usedLimit: number; interestRateApr: number; dueDayOfMonth: number | null }
+    > = {};
     cardsQuery.data.cards.forEach((card) => {
       next[card.id] = {
         limit: card.limit,
         usedLimit: card.usedLimit,
-        interestRateApr: card.interestRateApr ?? 0
+        interestRateApr: card.interestRateApr ?? 0,
+        dueDayOfMonth: card.dueDayOfMonth ?? null
       };
     });
     setCardDrafts(next);
@@ -97,6 +162,30 @@ export default function CardsPage() {
     setFormulaVariantId(activePayment.formulaVariantId);
   }, [activePayment]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const supported =
+      "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+    setPushSupported(supported);
+
+    if (!supported) {
+      return;
+    }
+
+    setNotificationPermission(Notification.permission);
+
+    void (async () => {
+      const registration =
+        (await navigator.serviceWorker.getRegistration()) ||
+        (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+      const subscription = await registration.pushManager.getSubscription();
+      setPushSubscribed(Boolean(subscription));
+    })();
+  }, []);
+
   async function saveCard(cardId: string) {
     setMessage(null);
     const draft = cardDrafts[cardId];
@@ -109,7 +198,8 @@ export default function CardsPage() {
       body: JSON.stringify(draft)
     });
 
-    setMessage(`Saved card ${cardId}`);
+    const cardName = cardsQuery.data?.cards.find((entry) => entry.id === cardId)?.name || cardId;
+    setMessage(`Saved ${cardName}`);
     await Promise.all([cardsQuery.refetch(), paymentsQuery.refetch()]);
   }
 
@@ -133,12 +223,114 @@ export default function CardsPage() {
     await paymentsQuery.refetch();
   }
 
+  async function enablePushReminders() {
+    if (!pushSupported || typeof window === "undefined") {
+      setPushMessage("Push notifications are not supported on this device/browser.");
+      return;
+    }
+
+    setPushBusy(true);
+    setPushMessage(null);
+
+    try {
+      let permission = Notification.permission;
+      if (permission === "default") {
+        permission = await Notification.requestPermission();
+      }
+      setNotificationPermission(permission);
+
+      if (permission !== "granted") {
+        setPushSubscribed(false);
+        setPushMessage("Notification permission was not granted.");
+        return;
+      }
+
+      const registration =
+        (await navigator.serviceWorker.getRegistration()) ||
+        (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        const vapid = await authedRequest<VapidPublicKeyResponse>(
+          getIdToken,
+          "/api/notifications/vapid-public-key"
+        );
+        const vapidKey = urlBase64ToUint8Array(vapid.publicKey);
+        const applicationServerKey = vapidKey.buffer.slice(
+          vapidKey.byteOffset,
+          vapidKey.byteOffset + vapidKey.byteLength
+        ) as ArrayBuffer;
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey
+        });
+      }
+
+      const serialized = subscription.toJSON();
+      if (!serialized.endpoint || !serialized.keys?.auth || !serialized.keys?.p256dh) {
+        throw new Error("Push subscription response is missing endpoint/keys.");
+      }
+
+      await authedRequest(getIdToken, "/api/notifications/subscriptions", {
+        method: "POST",
+        body: JSON.stringify({
+          subscription: {
+            endpoint: serialized.endpoint,
+            expirationTime: serialized.expirationTime ?? null,
+            keys: {
+              auth: serialized.keys.auth,
+              p256dh: serialized.keys.p256dh
+            }
+          },
+          userAgent: navigator.userAgent
+        })
+      });
+
+      setPushSubscribed(true);
+      setPushMessage("Push reminders enabled.");
+    } catch (error) {
+      setPushSubscribed(false);
+      setPushMessage(error instanceof Error ? error.message : "Failed to enable push reminders.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function disablePushReminders() {
+    if (!pushSupported || typeof window === "undefined") {
+      return;
+    }
+
+    setPushBusy(true);
+    setPushMessage(null);
+
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = registration ? await registration.pushManager.getSubscription() : null;
+
+      if (subscription) {
+        await authedRequest(getIdToken, "/api/notifications/subscriptions", {
+          method: "DELETE",
+          body: JSON.stringify({ endpoint: subscription.endpoint })
+        });
+        await subscription.unsubscribe();
+      }
+
+      setPushSubscribed(false);
+      setPushMessage("Push reminders disabled.");
+    } catch (error) {
+      setPushMessage(error instanceof Error ? error.message : "Failed to disable push reminders.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   return (
     <ProtectedPage title="Cards & Monthly Payments">
       <div className="space-y-4">
         <SectionPanel
           title="Card limits"
-          subtitle="Update limits, used balances, and APR. Interest and projected balances recalculate per selected month."
+          subtitle="Update limits, used balances, APR, and due dates. Interest and projected balances recalculate per selected month."
         >
           {cardsQuery.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading cards...</p> : null}
           {cardsQuery.error ? <p className="text-sm text-red-700">{(cardsQuery.error as Error).message}</p> : null}
@@ -148,7 +340,8 @@ export default function CardsPage() {
               const draft = cardDrafts[card.id] || {
                 limit: card.limit,
                 usedLimit: card.usedLimit,
-                interestRateApr: card.interestRateApr ?? 0
+                interestRateApr: card.interestRateApr ?? 0,
+                dueDayOfMonth: card.dueDayOfMonth ?? null
               };
               const available = draft.limit - draft.usedLimit;
               const projection = activeProjection?.entries[card.id];
@@ -202,10 +395,30 @@ export default function CardsPage() {
                         }
                       />
                     </div>
-                    <div className="grid grid-cols-1 gap-2 text-sm text-[var(--ink-soft)]">
+                    <div>
+                      <p className="label">Due day (1-31)</p>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={draft.dueDayOfMonth ?? ""}
+                        onChange={(event) =>
+                          setCardDrafts((prev) => ({
+                            ...prev,
+                            [card.id]: {
+                              ...draft,
+                              dueDayOfMonth: parseDueDayInput(event.target.value)
+                            }
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 text-sm text-[var(--ink-soft)] sm:col-span-2">
                       <p>Available: {formatGBP(available)}</p>
                       <p>Interest ({month || "month"}): {formatGBP(projection?.interestAdded ?? 0)}</p>
                       <p>Projected used: {formatGBP(projection?.closingBalance ?? draft.usedLimit)}</p>
+                      <p>Next due: {toDueSummary(draft.dueDayOfMonth)}</p>
                     </div>
                   </div>
                   <button className="button-secondary mt-3 w-full" type="button" onClick={() => saveCard(card.id)}>
@@ -224,6 +437,8 @@ export default function CardsPage() {
                   <th>Limit</th>
                   <th>Used</th>
                   <th>APR %</th>
+                  <th>Due Day</th>
+                  <th>Next Due</th>
                   <th>Available</th>
                   <th>Interest ({month || "month"})</th>
                   <th>Projected Used ({month || "month"})</th>
@@ -235,7 +450,8 @@ export default function CardsPage() {
                   const draft = cardDrafts[card.id] || {
                     limit: card.limit,
                     usedLimit: card.usedLimit,
-                    interestRateApr: card.interestRateApr ?? 0
+                    interestRateApr: card.interestRateApr ?? 0,
+                    dueDayOfMonth: card.dueDayOfMonth ?? null
                   };
                   const available = draft.limit - draft.usedLimit;
                   const projection = activeProjection?.entries[card.id];
@@ -284,6 +500,25 @@ export default function CardsPage() {
                           }
                         />
                       </td>
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={draft.dueDayOfMonth ?? ""}
+                          onChange={(event) =>
+                            setCardDrafts((prev) => ({
+                              ...prev,
+                              [card.id]: {
+                                ...draft,
+                                dueDayOfMonth: parseDueDayInput(event.target.value)
+                              }
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>{toDueSummary(draft.dueDayOfMonth)}</td>
                       <td>{formatGBP(available)}</td>
                       <td>{formatGBP(projection?.interestAdded ?? 0)}</td>
                       <td>{formatGBP(projection?.closingBalance ?? draft.usedLimit)}</td>
@@ -297,6 +532,49 @@ export default function CardsPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        </SectionPanel>
+
+        <SectionPanel
+          title="Push reminders"
+          subtitle="Enable browser push notifications for card due date reminders. On iOS, install the app to Home Screen first."
+        >
+          <div className="panel p-4">
+            <p className="text-sm text-[var(--ink-soft)]">
+              Status:{" "}
+              <span className="font-medium text-[var(--ink-main)]">
+                {!pushSupported
+                  ? "Unsupported on this browser"
+                  : pushSubscribed
+                    ? "Enabled"
+                    : "Not enabled"}
+              </span>
+            </p>
+            <p className="mt-2 text-xs text-[var(--ink-soft)]">
+              Permission: <span className="font-medium text-[var(--ink-main)]">{notificationPermission}</span>
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <button
+                className="button-primary w-full sm:w-auto"
+                type="button"
+                onClick={() => enablePushReminders()}
+                disabled={pushBusy || !pushSupported}
+              >
+                {pushBusy ? "Working..." : "Enable push reminders"}
+              </button>
+              <button
+                className="button-secondary w-full sm:w-auto"
+                type="button"
+                onClick={() => disablePushReminders()}
+                disabled={pushBusy || !pushSubscribed}
+              >
+                Disable push
+              </button>
+            </div>
+            {pushMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{pushMessage}</p> : null}
+            <p className="mt-2 text-xs text-[var(--ink-soft)]">
+              Reminders are sent daily from Vercel Cron for cards due in 7 days, 1 day, and today.
+            </p>
           </div>
         </SectionPanel>
 

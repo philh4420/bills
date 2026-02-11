@@ -80,3 +80,56 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+self.addEventListener("push", (event) => {
+  const data = (() => {
+    if (!event.data) {
+      return {};
+    }
+
+    try {
+      return event.data.json();
+    } catch {
+      return { body: event.data.text() };
+    }
+  })();
+
+  const title = data.title || "Bills App reminder";
+  const body = data.body || "You have an upcoming card payment due.";
+  const url = data.url || "/cards";
+  const tag = data.tag || "bills-reminder";
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag,
+      icon: "/icons/192",
+      badge: "/icons/192",
+      data: { url }
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification?.data?.url || "/cards";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => {
+        try {
+          const url = new URL(client.url);
+          return url.pathname === targetUrl;
+        } catch {
+          return false;
+        }
+      });
+
+      if (existing) {
+        return existing.focus();
+      }
+
+      return self.clients.openWindow(targetUrl);
+    })
+  );
+});

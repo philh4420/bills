@@ -47,6 +47,7 @@ export async function commitWorkbookImport(params: {
       limit: card.limit,
       usedLimit: card.usedLimit,
       interestRateApr: card.interestRateApr ?? 0,
+      dueDayOfMonth: card.dueDayOfMonth ?? null,
       createdAt: now,
       updatedAt: now
     };

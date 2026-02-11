@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 import { DocumentData, QueryDocumentSnapshot, WriteBatch } from "firebase-admin/firestore";
 
@@ -11,6 +11,7 @@ import {
   MonthlyAdjustment,
   MonthlyCardPayments,
   MonthSnapshot,
+  PushSubscriptionRecord,
   PurchasePlan,
   UserProfile
 } from "@/types";
@@ -57,7 +58,8 @@ export async function listCardAccounts(uid: string): Promise<CardAccount[]> {
   const snap = await userDoc(uid).collection(COLLECTIONS.cardAccounts).get();
   return mapDocs<CardAccount>(snap.docs).map((card) => ({
     ...card,
-    interestRateApr: card.interestRateApr ?? 0
+    interestRateApr: card.interestRateApr ?? 0,
+    dueDayOfMonth: card.dueDayOfMonth ?? null
   }));
 }
 
@@ -80,6 +82,31 @@ export async function listLineItems(
 export async function listPurchasePlans(uid: string): Promise<PurchasePlan[]> {
   const snap = await userDoc(uid).collection(COLLECTIONS.purchasePlans).orderBy("name", "asc").get();
   return mapDocs<PurchasePlan>(snap.docs);
+}
+
+function toPushSubscriptionId(endpoint: string): string {
+  return createHash("sha256").update(endpoint).digest("hex");
+}
+
+export async function listPushSubscriptions(uid: string): Promise<PushSubscriptionRecord[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.pushSubscriptions).get();
+  return mapDocs<PushSubscriptionRecord>(snap.docs);
+}
+
+export async function upsertPushSubscription(
+  uid: string,
+  payload: Omit<PushSubscriptionRecord, "id">
+): Promise<string> {
+  const id = toPushSubscriptionId(payload.endpoint);
+  await userDoc(uid).collection(COLLECTIONS.pushSubscriptions).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
+  return id;
+}
+
+export async function deletePushSubscription(uid: string, endpoint: string): Promise<void> {
+  const id = toPushSubscriptionId(endpoint);
+  await userDoc(uid).collection(COLLECTIONS.pushSubscriptions).doc(id).delete();
 }
 
 export async function listMonthSnapshots(uid: string): Promise<MonthSnapshot[]> {

@@ -40,6 +40,30 @@ Open [http://localhost:3000](http://localhost:3000).
 3. Add all required environment variables from `.env.example`.
 4. Deploy `main` for production.
 
+## Card due date reminders (PWA push + Vercel Cron)
+
+1. Generate VAPID keys:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+2. Add these Vercel environment variables:
+- `WEB_PUSH_SUBJECT` (example: `mailto:you@example.com`)
+- `WEB_PUSH_VAPID_PUBLIC_KEY`
+- `WEB_PUSH_VAPID_PRIVATE_KEY`
+- `CRON_SECRET`
+- optional `CARD_REMINDER_OFFSETS` (default `7,1,0`)
+
+3. Keep `vercel.json` cron enabled:
+- `GET /api/cron/card-reminders` runs daily at `0 8 * * *` (UTC).
+- On Hobby plan this is valid for free use.
+
+4. In the app:
+- Set `Due day` for cards on `/cards`.
+- Enable push notifications in `/cards` -> `Push reminders`.
+- On iOS, install from Safari to Home Screen and allow notifications.
+
 ## API routes
 
 - `POST /api/import/bills-xlsx`
@@ -54,3 +78,6 @@ Open [http://localhost:3000](http://localhost:3000).
 - `GET|POST /api/my-bills`, `PATCH|DELETE /api/my-bills/:id`
 - `GET|POST /api/monthly-adjustments`, `PATCH|DELETE /api/monthly-adjustments/:id`
 - `GET|POST /api/purchases`, `PATCH /api/purchases/:id`
+- `GET /api/notifications/vapid-public-key`
+- `GET|POST|DELETE /api/notifications/subscriptions`
+- `GET|POST /api/cron/card-reminders` (Vercel cron or manual secure trigger)

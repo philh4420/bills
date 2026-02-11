@@ -33,6 +33,10 @@ export async function PATCH(
       limit: parsed.data.limit ?? existing.limit,
       usedLimit: parsed.data.usedLimit ?? existing.usedLimit,
       interestRateApr: parsed.data.interestRateApr ?? existing.interestRateApr ?? 0,
+      dueDayOfMonth:
+        parsed.data.dueDayOfMonth === undefined
+          ? (existing.dueDayOfMonth ?? null)
+          : parsed.data.dueDayOfMonth,
       createdAt: existing.createdAt,
       updatedAt: now
     });

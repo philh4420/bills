@@ -7,7 +7,26 @@ export const monthKeySchema = z
 export const cardPatchSchema = z.object({
   limit: z.number().nonnegative().optional(),
   usedLimit: z.number().nonnegative().optional(),
-  interestRateApr: z.number().min(0).max(1000).optional()
+  interestRateApr: z.number().min(0).max(1000).optional(),
+  dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()
+});
+
+export const webPushSubscriptionSchema = z.object({
+  endpoint: z.url(),
+  expirationTime: z.number().nullable().optional(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1)
+  })
+});
+
+export const pushSubscriptionUpsertSchema = z.object({
+  subscription: webPushSubscriptionSchema,
+  userAgent: z.string().trim().optional()
+});
+
+export const pushSubscriptionDeleteSchema = z.object({
+  endpoint: z.url()
 });
 
 export const lineItemCreateSchema = z.object({
