@@ -58,7 +58,8 @@ export async function POST(request: NextRequest) {
               title: "Bills App test notification",
               body: "Mobile push is set up correctly for this installed web app.",
               url: "/cards",
-              tag: `bills-test-${timestamp}`
+              tag: `bills-test-${timestamp}`,
+              badgeCount: 1
             }
           );
 

@@ -98,15 +98,38 @@ self.addEventListener("push", (event) => {
   const body = data.body || "You have an upcoming card payment due.";
   const url = data.url || "/cards";
   const tag = data.tag || "bills-reminder";
+  const countCandidate = Number(data.badgeCount);
+  const badgeCount = Number.isFinite(countCandidate) ? Math.max(0, Math.floor(countCandidate)) : null;
+  const notificationOptions = {
+    body,
+    tag,
+    renotify: true,
+    icon: "/icons/192",
+    badge: "/icons/192",
+    data: { url },
+    // Supported on Chromium/Android. Other platforms ignore this safely.
+    vibrate: [200, 100, 200]
+  };
 
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      tag,
-      icon: "/icons/192",
-      badge: "/icons/192",
-      data: { url }
-    })
+    (async () => {
+      await self.registration.showNotification(title, notificationOptions);
+
+      // Best-effort app icon badge updates for installed PWAs.
+      if ("setAppBadge" in self.registration) {
+        try {
+          if (badgeCount === null) {
+            await self.registration.setAppBadge(1);
+          } else if (badgeCount > 0) {
+            await self.registration.setAppBadge(badgeCount);
+          } else if ("clearAppBadge" in self.registration) {
+            await self.registration.clearAppBadge();
+          }
+        } catch {
+          // Ignore badge update failures.
+        }
+      }
+    })()
   );
 });
 
@@ -131,5 +154,25 @@ self.addEventListener("notificationclick", (event) => {
 
       return self.clients.openWindow(targetUrl);
     })
+  );
+});
+
+self.addEventListener("message", (event) => {
+  if (!event.data || event.data.type !== "CLEAR_BADGE") {
+    return;
+  }
+
+  if (!("clearAppBadge" in self.registration)) {
+    return;
+  }
+
+  event.waitUntil(
+    (async () => {
+      try {
+        await self.registration.clearAppBadge();
+      } catch {
+        // Ignore clear badge failures.
+      }
+    })()
   );
 });

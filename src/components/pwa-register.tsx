@@ -20,7 +20,38 @@ export function PwaRegister() {
       return;
     }
 
-    void navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    const clearBadges = async () => {
+      try {
+        if ("clearAppBadge" in navigator) {
+          await navigator.clearAppBadge();
+        }
+      } catch {
+        // Ignore client badge clear failures.
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.getRegistration();
+        registration?.active?.postMessage({ type: "CLEAR_BADGE" });
+      } catch {
+        // Ignore SW badge clear failures.
+      }
+    };
+
+    void navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(() => clearBadges());
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void clearBadges();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, []);
 
   return null;

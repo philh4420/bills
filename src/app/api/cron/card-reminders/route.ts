@@ -173,6 +173,7 @@ async function runReminderJob(request: NextRequest) {
     ...payload,
     tag: `smart-alerts-${nowTag}`,
     url: payload.url,
+    badgeCount: alerts.length,
     alerts: alerts.map((alert) => ({
       id: alert.id,
       type: alert.type,
