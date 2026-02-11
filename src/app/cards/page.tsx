@@ -37,6 +37,10 @@ interface VapidPublicKeyResponse {
   publicKey: string;
 }
 
+type DueTone = "neutral" | "ok" | "warn" | "danger";
+
+const DUE_DAY_OPTIONS = Array.from({ length: 31 }, (_, idx) => idx + 1);
+
 function parseDueDayInput(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -51,21 +55,64 @@ function parseDueDayInput(value: string): number | null {
   return Math.max(1, Math.min(31, parsed));
 }
 
-function toDueSummary(dueDayOfMonth?: number | null): string {
+function dueToneClass(tone: DueTone): string {
+  if (tone === "danger") {
+    return "border border-red-200 bg-red-50 text-red-800";
+  }
+  if (tone === "warn") {
+    return "border border-amber-200 bg-amber-50 text-amber-800";
+  }
+  if (tone === "ok") {
+    return "border border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+  return "border border-[var(--ring)] bg-white/80 text-[var(--ink-soft)]";
+}
+
+function getDueMeta(dueDayOfMonth?: number | null): {
+  statusLabel: string;
+  detailLabel: string;
+  tone: DueTone;
+} {
   if (!dueDayOfMonth || dueDayOfMonth < 1) {
-    return "No due date";
+    return {
+      statusLabel: "Not set",
+      detailLabel: "Set a due day to enable reminders.",
+      tone: "neutral"
+    };
   }
 
   const due = computeUpcomingDueDate(dueDayOfMonth);
+  const dateLabel = formatDueDateLabel(due.isoDate);
+
   if (due.daysUntil === 0) {
-    return `Due today (${formatDueDateLabel(due.isoDate)})`;
+    return {
+      statusLabel: "Due today",
+      detailLabel: dateLabel,
+      tone: "danger"
+    };
   }
 
   if (due.daysUntil === 1) {
-    return `Due tomorrow (${formatDueDateLabel(due.isoDate)})`;
+    return {
+      statusLabel: "Due tomorrow",
+      detailLabel: dateLabel,
+      tone: "warn"
+    };
   }
 
-  return `Due in ${due.daysUntil} days (${formatDueDateLabel(due.isoDate)})`;
+  if (due.daysUntil <= 7) {
+    return {
+      statusLabel: `Due in ${due.daysUntil} days`,
+      detailLabel: dateLabel,
+      tone: "warn"
+    };
+  }
+
+  return {
+    statusLabel: `Due in ${due.daysUntil} days`,
+    detailLabel: dateLabel,
+    tone: "ok"
+  };
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -345,6 +392,7 @@ export default function CardsPage() {
               };
               const available = draft.limit - draft.usedLimit;
               const projection = activeProjection?.entries[card.id];
+              const dueMeta = getDueMeta(draft.dueDayOfMonth);
 
               return (
                 <div className="panel p-4" key={`mobile-${card.id}`}>
@@ -397,12 +445,9 @@ export default function CardsPage() {
                     </div>
                     <div>
                       <p className="label">Due day (1-31)</p>
-                      <input
+                      <select
                         className="input mt-1"
-                        type="number"
-                        min={1}
-                        max={31}
-                        value={draft.dueDayOfMonth ?? ""}
+                        value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
                         onChange={(event) =>
                           setCardDrafts((prev) => ({
                             ...prev,
@@ -412,13 +457,25 @@ export default function CardsPage() {
                             }
                           }))
                         }
-                      />
+                      >
+                        <option value="">Not set</option>
+                        {DUE_DAY_OPTIONS.map((day) => (
+                          <option key={`${card.id}-due-${day}`} value={day}>
+                            {day}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="grid grid-cols-1 gap-2 text-sm text-[var(--ink-soft)] sm:col-span-2">
                       <p>Available: {formatGBP(available)}</p>
                       <p>Interest ({month || "month"}): {formatGBP(projection?.interestAdded ?? 0)}</p>
                       <p>Projected used: {formatGBP(projection?.closingBalance ?? draft.usedLimit)}</p>
-                      <p>Next due: {toDueSummary(draft.dueDayOfMonth)}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${dueToneClass(dueMeta.tone)}`}>
+                          {dueMeta.statusLabel}
+                        </span>
+                        <span className="text-xs text-[var(--ink-soft)]">{dueMeta.detailLabel}</span>
+                      </div>
                     </div>
                   </div>
                   <button className="button-secondary mt-3 w-full" type="button" onClick={() => saveCard(card.id)}>
@@ -437,8 +494,8 @@ export default function CardsPage() {
                   <th>Limit</th>
                   <th>Used</th>
                   <th>APR %</th>
-                  <th>Due Day</th>
-                  <th>Next Due</th>
+                  <th className="min-w-[108px]">Due Day</th>
+                  <th className="min-w-[190px]">Next Due</th>
                   <th>Available</th>
                   <th>Interest ({month || "month"})</th>
                   <th>Projected Used ({month || "month"})</th>
@@ -455,6 +512,7 @@ export default function CardsPage() {
                   };
                   const available = draft.limit - draft.usedLimit;
                   const projection = activeProjection?.entries[card.id];
+                  const dueMeta = getDueMeta(draft.dueDayOfMonth);
                   return (
                     <tr key={card.id}>
                       <td>{card.name}</td>
@@ -501,12 +559,9 @@ export default function CardsPage() {
                         />
                       </td>
                       <td>
-                        <input
-                          className="input"
-                          type="number"
-                          min={1}
-                          max={31}
-                          value={draft.dueDayOfMonth ?? ""}
+                        <select
+                          className="input min-w-[96px]"
+                          value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
                           onChange={(event) =>
                             setCardDrafts((prev) => ({
                               ...prev,
@@ -516,9 +571,25 @@ export default function CardsPage() {
                               }
                             }))
                           }
-                        />
+                        >
+                          <option value="">Not set</option>
+                          {DUE_DAY_OPTIONS.map((day) => (
+                            <option key={`${card.id}-desktop-due-${day}`} value={day}>
+                              {day}
+                            </option>
+                          ))}
+                        </select>
                       </td>
-                      <td>{toDueSummary(draft.dueDayOfMonth)}</td>
+                      <td>
+                        <div className="space-y-1">
+                          <span
+                            className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${dueToneClass(dueMeta.tone)}`}
+                          >
+                            {dueMeta.statusLabel}
+                          </span>
+                          <p className="text-xs text-[var(--ink-soft)]">{dueMeta.detailLabel}</p>
+                        </div>
+                      </td>
                       <td>{formatGBP(available)}</td>
                       <td>{formatGBP(projection?.interestAdded ?? 0)}</td>
                       <td>{formatGBP(projection?.closingBalance ?? draft.usedLimit)}</td>
