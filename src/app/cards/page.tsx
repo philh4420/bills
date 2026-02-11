@@ -487,19 +487,19 @@ export default function CardsPage() {
           </div>
 
           <div className="table-wrap hidden md:block">
-            <table>
+            <table className="min-w-[1230px] lg:min-w-[1320px]">
               <thead>
                 <tr>
-                  <th>Card</th>
-                  <th>Limit</th>
-                  <th>Used</th>
-                  <th>APR %</th>
+                  <th className="min-w-[126px]">Card</th>
+                  <th className="min-w-[114px]">Limit</th>
+                  <th className="min-w-[114px]">Used</th>
+                  <th className="min-w-[106px]">APR %</th>
                   <th className="min-w-[108px]">Due Day</th>
                   <th className="min-w-[190px]">Next Due</th>
-                  <th>Available</th>
-                  <th>Interest ({month || "month"})</th>
-                  <th>Projected Used ({month || "month"})</th>
-                  <th>Action</th>
+                  <th className="min-w-[116px]">Available</th>
+                  <th className="min-w-[132px]">Interest ({month || "month"})</th>
+                  <th className="min-w-[172px]">Projected Used ({month || "month"})</th>
+                  <th className="min-w-[96px]">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -518,7 +518,7 @@ export default function CardsPage() {
                       <td>{card.name}</td>
                       <td>
                         <input
-                          className="input"
+                          className="input min-w-[96px]"
                           type="number"
                           step="0.01"
                           value={draft.limit}
@@ -532,7 +532,7 @@ export default function CardsPage() {
                       </td>
                       <td>
                         <input
-                          className="input"
+                          className="input min-w-[96px]"
                           type="number"
                           step="0.01"
                           value={draft.usedLimit}
@@ -546,7 +546,7 @@ export default function CardsPage() {
                       </td>
                       <td>
                         <input
-                          className="input"
+                          className="input min-w-[92px]"
                           type="number"
                           step="0.01"
                           value={draft.interestRateApr}
@@ -590,9 +590,9 @@ export default function CardsPage() {
                           <p className="text-xs text-[var(--ink-soft)]">{dueMeta.detailLabel}</p>
                         </div>
                       </td>
-                      <td>{formatGBP(available)}</td>
-                      <td>{formatGBP(projection?.interestAdded ?? 0)}</td>
-                      <td>{formatGBP(projection?.closingBalance ?? draft.usedLimit)}</td>
+                      <td className="whitespace-nowrap">{formatGBP(available)}</td>
+                      <td className="whitespace-nowrap">{formatGBP(projection?.interestAdded ?? 0)}</td>
+                      <td className="whitespace-nowrap">{formatGBP(projection?.closingBalance ?? draft.usedLimit)}</td>
                       <td>
                         <button className="button-secondary" type="button" onClick={() => saveCard(card.id)}>
                           Save

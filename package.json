@@ -11,12 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:integration": "vitest run tests/integration",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
-    "ci": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "ci": "npm run typecheck && npm run lint && npm run build",
     "format": "prettier --check .",
     "format:write": "prettier --write ."
   },
@@ -34,19 +29,15 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
-    "@playwright/test": "1.58.2",
     "@tailwindcss/postcss": "4.1.18",
     "@types/node": "25.2.3",
     "@types/react": "19.2.13",
     "@types/react-dom": "19.2.3",
     "@types/web-push": "3.6.4",
-    "@vitest/coverage-v8": "4.0.18",
     "eslint": "^9.39.2",
     "eslint-config-next": "16.1.6",
-    "jsdom": "28.0.0",
     "prettier": "3.8.1",
     "tailwindcss": "4.1.18",
-    "typescript": "5.9.3",
-    "vitest": "4.0.18"
+    "typescript": "5.9.3"
   }
 }

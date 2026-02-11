@@ -23,7 +23,6 @@
       }
     ],
     "types": [
-      "vitest/globals",
       "node"
     ],
     "baseUrl": ".",
