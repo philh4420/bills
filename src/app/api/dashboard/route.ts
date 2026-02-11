@@ -8,7 +8,9 @@ import { buildMonthTimeline } from "@/lib/dashboard/timeline";
 import { computeCardMonthProjections, computeMonthSnapshots, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
 import {
   getAlertSettings,
+  getBankBalance,
   listCardAccounts,
+  listLoanedOutItems,
   listLineItems,
   listMonthlyAdjustments,
   listMonthlyPayments
@@ -27,8 +29,18 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const [cards, monthlyPayments, houseBills, income, shopping, myBills, adjustments, persistedAlertSettings] =
-      await Promise.all([
+    const [
+      cards,
+      monthlyPayments,
+      houseBills,
+      income,
+      shopping,
+      myBills,
+      adjustments,
+      loanedOutItems,
+      bankBalance,
+      persistedAlertSettings
+    ] = await Promise.all([
       listCardAccounts(uid),
       listMonthlyPayments(uid),
       listLineItems(uid, "houseBills"),
@@ -36,6 +48,8 @@ export async function GET(request: NextRequest) {
       listLineItems(uid, "shoppingItems"),
       listLineItems(uid, "myBills"),
       listMonthlyAdjustments(uid),
+      listLoanedOutItems(uid),
+      getBankBalance(uid),
       getAlertSettings(uid)
     ]);
 
@@ -50,7 +64,9 @@ export async function GET(request: NextRequest) {
       income,
       shopping,
       myBills,
-      adjustments
+      adjustments,
+      loanedOutItems,
+      baseBankBalance: bankBalance?.amount ?? 0
     });
 
     const availableMonths = snapshots.map((snapshot) => snapshot.month);
@@ -77,7 +93,10 @@ export async function GET(request: NextRequest) {
           cardInterestTotal:
             selectedSnapshot.cardInterestTotal ?? selectedProjection?.totalInterestAdded ?? 0,
           cardBalanceTotal:
-            selectedSnapshot.cardBalanceTotal ?? selectedProjection?.totalClosingBalance ?? 0
+            selectedSnapshot.cardBalanceTotal ?? selectedProjection?.totalClosingBalance ?? 0,
+          loanedOutOutstandingTotal: selectedSnapshot.loanedOutOutstandingTotal ?? 0,
+          loanedOutPaidBackTotal: selectedSnapshot.loanedOutPaidBackTotal ?? 0,
+          moneyInBank: selectedSnapshot.moneyInBank ?? 0
         }
       : null;
     const projectedClosingByCardId: Record<string, number> = selectedProjection
@@ -105,7 +124,8 @@ export async function GET(request: NextRequest) {
       houseBills,
       shopping,
       myBills,
-      adjustments
+      adjustments,
+      loanedOutItems
     });
 
     return jsonOk({
@@ -114,6 +134,8 @@ export async function GET(request: NextRequest) {
       snapshot: normalizedSnapshot,
       cards,
       monthlyPayments: selectedMonthlyPayment,
+      bankBalance,
+      loanedOutItems,
       alertSettings,
       alerts,
       timeline

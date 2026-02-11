@@ -28,11 +28,29 @@ interface MonthlyAdjustment {
   dueDayOfMonth?: number | null;
 }
 
+interface LoanedOutItem {
+  id: string;
+  name: string;
+  amount: number;
+  startMonth: string;
+  status: "outstanding" | "paidBack";
+  paidBackMonth?: string;
+}
+
+interface BankBalanceRecord {
+  id: string;
+  amount: number;
+}
+
 const DUE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
 const INCOME_SOURCE_OPTIONS = [
   { value: "loan", label: "Loan" },
   { value: "bonus", label: "Bonus" },
   { value: "other", label: "Other" }
+] as const;
+const LOAN_STATUS_OPTIONS = [
+  { value: "outstanding", label: "Outstanding" },
+  { value: "paidBack", label: "Paid back" }
 ] as const;
 
 function formatIncomeSourceLabel(sourceType?: "loan" | "bonus" | "other"): string {
@@ -43,6 +61,10 @@ function formatIncomeSourceLabel(sourceType?: "loan" | "bonus" | "other"): strin
     return "Bonus";
   }
   return "Other";
+}
+
+function formatLoanStatusLabel(status: "outstanding" | "paidBack"): string {
+  return status === "paidBack" ? "Paid back" : "Outstanding";
 }
 
 function parseDueDayInput(value: string): number | null {
@@ -1119,6 +1141,705 @@ function ExtraIncomeCollection({ getIdToken }: { getIdToken: () => Promise<strin
   );
 }
 
+function BankBalanceSection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
+  const [amountDraft, setAmountDraft] = useState("0");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const query = useQuery({
+    queryKey: ["bank-balance"],
+    queryFn: () => authedRequest<{ bankBalance: BankBalanceRecord | null }>(getIdToken, "/api/bank-balance")
+  });
+
+  useEffect(() => {
+    const amount = query.data?.bankBalance?.amount ?? 0;
+    setAmountDraft(String(amount));
+  }, [query.data?.bankBalance?.amount]);
+
+  async function saveBankBalance() {
+    const amount = Number.parseFloat(amountDraft);
+    if (!Number.isFinite(amount)) {
+      setMessage("Amount must be a valid number.");
+      return;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, "/api/bank-balance", {
+        method: "PUT",
+        body: JSON.stringify({
+          amount
+        })
+      });
+      setMessage("Saved bank balance");
+      await query.refetch();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save bank balance");
+    }
+  }
+
+  const parsedDraftAmount = Number.parseFloat(amountDraft);
+  const currentDisplayAmount =
+    query.data?.bankBalance?.amount ?? (Number.isFinite(parsedDraftAmount) ? parsedDraftAmount : 0);
+
+  return (
+    <SectionPanel
+      title="Money In Bank"
+      subtitle="Set your current bank amount. Dashboard money-in-bank uses this as the base balance."
+      right={
+        <p className="text-sm text-[var(--ink-soft)]">
+          Current: {formatGBP(currentDisplayAmount)}
+        </p>
+      }
+    >
+      {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
+      {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
+
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <label className="block">
+          <span className="label">Bank balance (GBP)</span>
+          <input
+            className="input mt-1"
+            type="number"
+            step="0.01"
+            value={amountDraft}
+            onChange={(event) => setAmountDraft(event.target.value)}
+          />
+        </label>
+        <button className="button-primary w-full sm:w-auto" type="button" onClick={() => saveBankBalance()}>
+          Save balance
+        </button>
+      </div>
+
+      {message ? <p className="mt-2 text-sm text-[var(--accent-strong)]">{message}</p> : null}
+    </SectionPanel>
+  );
+}
+
+function LoanedOutCollection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
+  const [message, setMessage] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, LoanedOutItem>>({});
+  const [mobileEditId, setMobileEditId] = useState<string | null>(null);
+  const [mobileAddOpen, setMobileAddOpen] = useState(false);
+  const [newItem, setNewItem] = useState({
+    name: "",
+    amount: "0",
+    startMonth: "2026-01",
+    status: "outstanding" as "outstanding" | "paidBack",
+    paidBackMonth: ""
+  });
+
+  const query = useQuery({
+    queryKey: ["loaned-out"],
+    queryFn: () => authedRequest<{ items: LoanedOutItem[] }>(getIdToken, "/api/loaned-out")
+  });
+
+  useEffect(() => {
+    const next: Record<string, LoanedOutItem> = {};
+    (query.data?.items || []).forEach((item) => {
+      next[item.id] = {
+        ...item,
+        paidBackMonth: item.paidBackMonth || undefined
+      };
+    });
+    setDrafts(next);
+  }, [query.data]);
+
+  const items = query.data?.items || [];
+  const totalOutstanding = items
+    .filter((item) => item.status === "outstanding")
+    .reduce((acc, item) => acc + item.amount, 0);
+  const totalPaidBack = items
+    .filter((item) => item.status === "paidBack")
+    .reduce((acc, item) => acc + item.amount, 0);
+
+  function getDraft(item: LoanedOutItem): LoanedOutItem {
+    return drafts[item.id] || { ...item, paidBackMonth: item.paidBackMonth || undefined };
+  }
+
+  function validateLoanMonths(input: {
+    startMonth: string;
+    status: "outstanding" | "paidBack";
+    paidBackMonth?: string;
+  }): { ok: true; startMonth: string; paidBackMonth?: string } | { ok: false; message: string } {
+    const startMonth = normalizeMonthInput(input.startMonth);
+    if (!startMonth) {
+      return { ok: false, message: "Start month must be in YYYY-MM format." };
+    }
+
+    const normalizedPaidBack = input.paidBackMonth ? normalizeMonthInput(input.paidBackMonth) : null;
+    if (input.paidBackMonth && !normalizedPaidBack) {
+      return { ok: false, message: "Paid-back month must be in YYYY-MM format." };
+    }
+
+    if (input.status === "paidBack" && !normalizedPaidBack) {
+      return { ok: false, message: "Paid-back month is required when status is paid back." };
+    }
+
+    if (normalizedPaidBack && normalizedPaidBack < startMonth) {
+      return { ok: false, message: "Paid-back month must be greater than or equal to start month." };
+    }
+
+    return {
+      ok: true,
+      startMonth,
+      paidBackMonth: input.status === "paidBack" ? normalizedPaidBack || undefined : undefined
+    };
+  }
+
+  const mobileItem = mobileEditId ? items.find((entry) => entry.id === mobileEditId) || null : null;
+  const mobileDraft = mobileItem ? getDraft(mobileItem) : null;
+
+  async function createItem(): Promise<boolean> {
+    if (!newItem.name.trim()) {
+      setMessage("Name is required.");
+      return false;
+    }
+
+    const parsedAmount = Number.parseFloat(newItem.amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setMessage("Amount must be greater than 0.");
+      return false;
+    }
+
+    const validated = validateLoanMonths({
+      startMonth: newItem.startMonth,
+      status: newItem.status,
+      paidBackMonth: newItem.paidBackMonth || undefined
+    });
+    if (!validated.ok) {
+      setMessage(validated.message);
+      return false;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, "/api/loaned-out", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newItem.name.trim(),
+          amount: parsedAmount,
+          startMonth: validated.startMonth,
+          status: newItem.status,
+          paidBackMonth: validated.paidBackMonth
+        })
+      });
+      setNewItem({
+        name: "",
+        amount: "0",
+        startMonth: "2026-01",
+        status: "outstanding",
+        paidBackMonth: ""
+      });
+      setMessage("Created loaned-out entry");
+      await query.refetch();
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to create loaned-out entry");
+      return false;
+    }
+  }
+
+  async function saveItem(id: string): Promise<boolean> {
+    const draft = drafts[id];
+    if (!draft) {
+      return false;
+    }
+
+    if (!draft.name.trim()) {
+      setMessage("Name is required.");
+      return false;
+    }
+    if (!Number.isFinite(draft.amount) || draft.amount <= 0) {
+      setMessage("Amount must be greater than 0.");
+      return false;
+    }
+
+    const validated = validateLoanMonths({
+      startMonth: draft.startMonth,
+      status: draft.status,
+      paidBackMonth: draft.paidBackMonth
+    });
+    if (!validated.ok) {
+      setMessage(validated.message);
+      return false;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/loaned-out/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: draft.name.trim(),
+          amount: draft.amount,
+          startMonth: validated.startMonth,
+          status: draft.status,
+          paidBackMonth: draft.status === "paidBack" ? validated.paidBackMonth : null
+        })
+      });
+      setMessage("Saved loaned-out entry");
+      await query.refetch();
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save loaned-out entry");
+      return false;
+    }
+  }
+
+  async function deleteItem(id: string): Promise<boolean> {
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/loaned-out/${id}`, {
+        method: "DELETE"
+      });
+      setMessage("Deleted loaned-out entry");
+      await query.refetch();
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete loaned-out entry");
+      return false;
+    }
+  }
+
+  return (
+    <SectionPanel
+      title="Money Loaned Out"
+      subtitle="Track money you have loaned out. When marked paid back, dashboard money in bank updates automatically."
+      right={
+        <p className="text-sm text-[var(--ink-soft)]">
+          Outstanding: {formatGBP(totalOutstanding)} | Paid back: {formatGBP(totalPaidBack)}
+        </p>
+      }
+    >
+      {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
+      {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
+
+      <div className="space-y-3 xl:hidden">
+        {items.map((item) => {
+          const draft = getDraft(item);
+          return (
+            <div className="mobile-edit-card" key={`mobile-loaned-out-${item.id}`}>
+              <div className="mobile-edit-card-head">
+                <div className="min-w-0">
+                  <p className="mobile-edit-card-title">{draft.name}</p>
+                  <p className="mobile-edit-card-subtitle">
+                    Start: {draft.startMonth}
+                    {draft.status === "paidBack" && draft.paidBackMonth ? ` | Paid back: ${draft.paidBackMonth}` : ""}
+                  </p>
+                </div>
+                <button className="button-secondary shrink-0" type="button" onClick={() => setMobileEditId(item.id)}>
+                  Edit
+                </button>
+              </div>
+              <div className="mobile-edit-keyvals">
+                <div className="mobile-edit-keyval">
+                  <span className="mobile-edit-keyval-label">Status</span>
+                  <span className="mobile-edit-keyval-value">{formatLoanStatusLabel(draft.status)}</span>
+                </div>
+                <div className="mobile-edit-keyval">
+                  <span className="mobile-edit-keyval-label">Amount</span>
+                  <span className="mobile-edit-keyval-value">{formatGBP(draft.amount)}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        <button className="button-primary w-full" type="button" onClick={() => setMobileAddOpen(true)}>
+          Add loaned-out money
+        </button>
+
+        <MobileEditDrawer
+          open={Boolean(mobileItem && mobileDraft)}
+          title={mobileItem ? `Edit ${mobileItem.name}` : "Edit loaned-out item"}
+          subtitle="Update amount, status, and month details."
+          onClose={() => setMobileEditId(null)}
+          footer={
+            <div className="flex flex-col gap-2">
+              {mobileItem ? (
+                <button
+                  className="button-danger w-full sm:w-auto"
+                  type="button"
+                  onClick={async () => {
+                    const deleted = await deleteItem(mobileItem.id);
+                    if (deleted) {
+                      setMobileEditId(null);
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => setMobileEditId(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="button-primary w-full sm:w-auto"
+                  type="button"
+                  onClick={async () => {
+                    if (!mobileItem) {
+                      return;
+                    }
+                    const saved = await saveItem(mobileItem.id);
+                    if (saved) {
+                      setMobileEditId(null);
+                    }
+                  }}
+                >
+                  Save loan
+                </button>
+              </div>
+            </div>
+          }
+        >
+          {mobileItem && mobileDraft ? (
+            <div className="grid gap-3">
+              <div>
+                <p className="label">Name</p>
+                <input
+                  className="input mt-1"
+                  value={mobileDraft.name}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, name: event.target.value }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">Amount</p>
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step="0.01"
+                  value={mobileDraft.amount}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, amount: Number(event.target.value) }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">Start month</p>
+                <input
+                  className="input mt-1"
+                  type="month"
+                  value={mobileDraft.startMonth}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, startMonth: event.target.value }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">Status</p>
+                <select
+                  className="input mt-1"
+                  value={mobileDraft.status}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: {
+                        ...mobileDraft,
+                        status: event.target.value as LoanedOutItem["status"],
+                        paidBackMonth:
+                          event.target.value === "paidBack" ? mobileDraft.paidBackMonth : undefined
+                      }
+                    }))
+                  }
+                >
+                  {LOAN_STATUS_OPTIONS.map((option) => (
+                    <option key={`mobile-loan-status-${mobileItem.id}-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="label">Paid-back month {mobileDraft.status === "paidBack" ? "" : "(optional)"}</p>
+                <input
+                  className="input mt-1"
+                  type="month"
+                  value={mobileDraft.paidBackMonth || ""}
+                  disabled={mobileDraft.status !== "paidBack"}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, paidBackMonth: event.target.value || undefined }
+                    }))
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
+        </MobileEditDrawer>
+
+        <MobileEditDrawer
+          open={mobileAddOpen}
+          title="Add loaned-out money"
+          subtitle="Track money given out and when it is repaid."
+          onClose={() => setMobileAddOpen(false)}
+          footer={
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => setMobileAddOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="button-primary w-full sm:w-auto"
+                type="button"
+                onClick={async () => {
+                  const created = await createItem();
+                  if (created) {
+                    setMobileAddOpen(false);
+                  }
+                }}
+              >
+                Add loan
+              </button>
+            </div>
+          }
+        >
+          <div className="grid gap-3">
+            <div>
+              <p className="label">Name</p>
+              <input
+                className="input mt-1"
+                placeholder="Loan to family"
+                value={newItem.name}
+                onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+              />
+            </div>
+            <div>
+              <p className="label">Amount</p>
+              <input
+                className="input mt-1"
+                type="number"
+                step="0.01"
+                value={newItem.amount}
+                onChange={(event) => setNewItem((prev) => ({ ...prev, amount: event.target.value }))}
+              />
+            </div>
+            <div>
+              <p className="label">Start month</p>
+              <input
+                className="input mt-1"
+                type="month"
+                value={newItem.startMonth}
+                onChange={(event) => setNewItem((prev) => ({ ...prev, startMonth: event.target.value }))}
+              />
+            </div>
+            <div>
+              <p className="label">Status</p>
+              <select
+                className="input mt-1"
+                value={newItem.status}
+                onChange={(event) =>
+                  setNewItem((prev) => ({
+                    ...prev,
+                    status: event.target.value as LoanedOutItem["status"],
+                    paidBackMonth: event.target.value === "paidBack" ? prev.paidBackMonth : ""
+                  }))
+                }
+              >
+                {LOAN_STATUS_OPTIONS.map((option) => (
+                  <option key={`new-loaned-out-status-mobile-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <p className="label">Paid-back month</p>
+              <input
+                className="input mt-1"
+                type="month"
+                value={newItem.paidBackMonth}
+                disabled={newItem.status !== "paidBack"}
+                onChange={(event) => setNewItem((prev) => ({ ...prev, paidBackMonth: event.target.value }))}
+              />
+            </div>
+          </div>
+        </MobileEditDrawer>
+      </div>
+
+      <div className="table-wrap hidden xl:block">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Amount</th>
+              <th>Start month</th>
+              <th>Status</th>
+              <th>Paid-back month</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id}>
+                <td>
+                  <input
+                    className="input"
+                    value={drafts[item.id]?.name || ""}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], name: event.target.value }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={drafts[item.id]?.amount ?? 0}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], amount: Number(event.target.value) }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="input"
+                    type="month"
+                    value={drafts[item.id]?.startMonth || ""}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], startMonth: event.target.value }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    value={drafts[item.id]?.status || "outstanding"}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: {
+                          ...prev[item.id],
+                          status: event.target.value as LoanedOutItem["status"],
+                          paidBackMonth:
+                            event.target.value === "paidBack" ? prev[item.id]?.paidBackMonth : undefined
+                        }
+                      }))
+                    }
+                  >
+                    {LOAN_STATUS_OPTIONS.map((option) => (
+                      <option key={`desktop-loaned-out-status-${item.id}-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    className="input"
+                    type="month"
+                    value={drafts[item.id]?.paidBackMonth || ""}
+                    disabled={drafts[item.id]?.status !== "paidBack"}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: { ...prev[item.id], paidBackMonth: event.target.value || undefined }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <div className="flex gap-2">
+                    <button className="button-secondary" type="button" onClick={() => saveItem(item.id)}>
+                      Save
+                    </button>
+                    <button className="button-danger" type="button" onClick={() => deleteItem(item.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+
+            <tr>
+              <td>
+                <input
+                  className="input"
+                  value={newItem.name}
+                  placeholder="Loan to family"
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={newItem.amount}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, amount: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="month"
+                  value={newItem.startMonth}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, startMonth: event.target.value }))}
+                />
+              </td>
+              <td>
+                <select
+                  className="input"
+                  value={newItem.status}
+                  onChange={(event) =>
+                    setNewItem((prev) => ({
+                      ...prev,
+                      status: event.target.value as LoanedOutItem["status"],
+                      paidBackMonth: event.target.value === "paidBack" ? prev.paidBackMonth : ""
+                    }))
+                  }
+                >
+                  {LOAN_STATUS_OPTIONS.map((option) => (
+                    <option key={`desktop-new-loaned-out-status-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="month"
+                  value={newItem.paidBackMonth}
+                  disabled={newItem.status !== "paidBack"}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, paidBackMonth: event.target.value }))}
+                />
+              </td>
+              <td>
+                <button className="button-primary" type="button" onClick={() => createItem()}>
+                  Add
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {message ? <p className="mt-2 text-sm text-[var(--accent-strong)]">{message}</p> : null}
+    </SectionPanel>
+  );
+}
+
 function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
   const [message, setMessage] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, MonthlyAdjustment>>({});
@@ -1797,7 +2518,9 @@ export default function BillsPage() {
           endpoint="/api/income"
           getIdToken={getIdToken}
         />
+        <BankBalanceSection getIdToken={getIdToken} />
         <ExtraIncomeCollection getIdToken={getIdToken} />
+        <LoanedOutCollection getIdToken={getIdToken} />
         <LineItemCollection
           title="Shopping"
           subtitle="Variable shopping budget items."

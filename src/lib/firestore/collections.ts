@@ -6,6 +6,8 @@ export const COLLECTIONS = {
   shoppingItems: "shoppingItems",
   myBills: "myBills",
   monthlyAdjustments: "monthlyAdjustments",
+  loanedOutItems: "loanedOutItems",
+  bankBalances: "bankBalances",
   purchasePlans: "purchasePlans",
   monthSnapshots: "monthSnapshots",
   imports: "imports",

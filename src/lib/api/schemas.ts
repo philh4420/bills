@@ -91,3 +91,53 @@ export const alertSettingsPutSchema = z.object({
   lowMoneyLeftThreshold: z.number().nonnegative(),
   utilizationThresholdPercent: z.number().min(0).max(1000)
 });
+
+export const loanedOutStatusSchema = z.enum(["outstanding", "paidBack"]);
+
+export const loanedOutCreateSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    amount: z.number().positive(),
+    startMonth: monthKeySchema,
+    status: loanedOutStatusSchema,
+    paidBackMonth: monthKeySchema.optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.status === "paidBack") {
+      if (!value.paidBackMonth) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["paidBackMonth"],
+          message: "paidBackMonth is required when status is paidBack"
+        });
+      } else if (value.paidBackMonth < value.startMonth) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["paidBackMonth"],
+          message: "paidBackMonth must be greater than or equal to startMonth"
+        });
+      }
+    }
+  });
+
+export const loanedOutPatchSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    amount: z.number().positive().optional(),
+    startMonth: monthKeySchema.optional(),
+    status: loanedOutStatusSchema.optional(),
+    paidBackMonth: monthKeySchema.nullable().optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.status !== "paidBack" && value.paidBackMonth !== undefined && value.paidBackMonth !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["paidBackMonth"],
+        message: "paidBackMonth can only be set when status is paidBack"
+      });
+    }
+  });
+
+export const bankBalancePutSchema = z.object({
+  amount: z.number()
+});

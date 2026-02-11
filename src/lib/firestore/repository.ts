@@ -6,9 +6,11 @@ import { getFirebaseAdminFirestore } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import {
   AlertSettings,
+  BankBalance,
   CardAccount,
   ImportRecord,
   LineItem,
+  LoanedOutItem,
   MonthlyAdjustment,
   MonthlyCardPayments,
   MonthSnapshot,
@@ -129,6 +131,65 @@ export async function listMonthlyAdjustments(uid: string): Promise<MonthlyAdjust
     ...adjustment,
     dueDayOfMonth: adjustment.dueDayOfMonth ?? 1
   }));
+}
+
+export async function listLoanedOutItems(uid: string): Promise<LoanedOutItem[]> {
+  const snap = await userDoc(uid)
+    .collection(COLLECTIONS.loanedOutItems)
+    .orderBy("startMonth", "asc")
+    .get();
+  return mapDocs<LoanedOutItem>(snap.docs)
+    .map((item) => ({
+      ...item,
+      status: (item.status === "paidBack" ? "paidBack" : "outstanding") as LoanedOutItem["status"],
+      paidBackMonth: item.paidBackMonth || undefined
+    }))
+    .sort((a, b) => a.startMonth.localeCompare(b.startMonth) || a.name.localeCompare(b.name));
+}
+
+export async function createLoanedOutItem(
+  uid: string,
+  payload: Omit<LoanedOutItem, "id">
+): Promise<string> {
+  const id = randomUUID();
+  await userDoc(uid).collection(COLLECTIONS.loanedOutItems).doc(id).set(stripUndefined(payload));
+  return id;
+}
+
+export async function updateLoanedOutItem(
+  uid: string,
+  id: string,
+  payload: Partial<Omit<LoanedOutItem, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.loanedOutItems).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
+}
+
+export async function deleteLoanedOutItem(uid: string, id: string): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.loanedOutItems).doc(id).delete();
+}
+
+export async function getBankBalance(uid: string): Promise<BankBalance | null> {
+  const doc = await userDoc(uid).collection(COLLECTIONS.bankBalances).doc("primary").get();
+  if (!doc.exists) {
+    return null;
+  }
+  const data = doc.data() as Omit<BankBalance, "id">;
+  return {
+    id: doc.id,
+    ...data
+  };
+}
+
+export async function upsertBankBalance(
+  uid: string,
+  payload: Omit<BankBalance, "id">,
+  id = "primary"
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.bankBalances).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
 }
 
 export async function getAlertSettings(uid: string): Promise<AlertSettings | null> {

@@ -1,6 +1,8 @@
 import { computeMonthSnapshots } from "@/lib/formulas/engine";
 import {
+  getBankBalance,
   listCardAccounts,
+  listLoanedOutItems,
   listMonthlyAdjustments,
   listLineItems,
   listMonthlyPayments,
@@ -8,7 +10,7 @@ import {
 } from "@/lib/firestore/repository";
 
 export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
-  const [cards, monthlyPayments, houseBills, income, shopping, myBills, adjustments] =
+  const [cards, monthlyPayments, houseBills, income, shopping, myBills, adjustments, loanedOutItems, bankBalance] =
     await Promise.all([
       listCardAccounts(uid),
       listMonthlyPayments(uid),
@@ -16,7 +18,9 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
       listLineItems(uid, "incomeItems"),
       listLineItems(uid, "shoppingItems"),
       listLineItems(uid, "myBills"),
-      listMonthlyAdjustments(uid)
+      listMonthlyAdjustments(uid),
+      listLoanedOutItems(uid),
+      getBankBalance(uid)
     ]);
 
   const snapshots = computeMonthSnapshots({
@@ -26,7 +30,9 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
     income,
     shopping,
     myBills,
-    adjustments
+    adjustments,
+    loanedOutItems,
+    baseBankBalance: bankBalance?.amount ?? 0
   });
 
   await replaceMonthSnapshots(uid, snapshots);

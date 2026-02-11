@@ -67,6 +67,26 @@ export interface MonthlyAdjustment {
   updatedAt: string;
 }
 
+export type LoanedOutStatus = "outstanding" | "paidBack";
+
+export interface LoanedOutItem {
+  id: string;
+  name: string;
+  amount: number;
+  startMonth: MonthKey;
+  status: LoanedOutStatus;
+  paidBackMonth?: MonthKey | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BankBalance {
+  id: string;
+  amount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type PurchaseStatus = "planned" | "bought" | "skipped";
 
 export interface PurchasePlan {
@@ -90,6 +110,9 @@ export interface MonthSnapshot {
   cardInterestTotal: number;
   cardBalanceTotal: number;
   cardSpendTotal: number;
+  loanedOutOutstandingTotal: number;
+  loanedOutPaidBackTotal: number;
+  moneyInBank: number;
   moneyLeft: number;
   formulaVariantId: string;
   inferred: boolean;
@@ -145,6 +168,8 @@ export interface DashboardResponse {
   snapshot: MonthSnapshot | null;
   cards: CardAccount[];
   monthlyPayments: MonthlyCardPayments | null;
+  bankBalance: BankBalance | null;
+  loanedOutItems: LoanedOutItem[];
   alertSettings: AlertSettings;
   alerts: SmartAlert[];
   timeline: MonthTimeline;

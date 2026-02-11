@@ -5,6 +5,7 @@ import {
   AdjustmentCategory,
   CardAccount,
   LineItem,
+  LoanedOutItem,
   MonthlyAdjustment,
   MonthlyCardPayments,
   MonthSnapshot
@@ -171,6 +172,29 @@ function totalAdjustmentsForMonth(
   );
 }
 
+function isLoanActiveForMonth(month: string, loan: Pick<LoanedOutItem, "startMonth" | "status" | "paidBackMonth">): boolean {
+  if (month < loan.startMonth) {
+    return false;
+  }
+
+  if (loan.status !== "paidBack") {
+    return true;
+  }
+
+  if (!loan.paidBackMonth) {
+    return false;
+  }
+
+  return month < loan.paidBackMonth;
+}
+
+function isLoanPaidBackByMonth(
+  month: string,
+  loan: Pick<LoanedOutItem, "status" | "paidBackMonth">
+): boolean {
+  return loan.status === "paidBack" && Boolean(loan.paidBackMonth && loan.paidBackMonth <= month);
+}
+
 export function computeMonthSnapshots(params: {
   cards: CardAccount[];
   monthlyPayments: MonthlyCardPayments[];
@@ -179,8 +203,20 @@ export function computeMonthSnapshots(params: {
   shopping: LineItem[];
   myBills: LineItem[];
   adjustments: MonthlyAdjustment[];
+  loanedOutItems: LoanedOutItem[];
+  baseBankBalance: number;
 }): MonthSnapshot[] {
-  const { cards, monthlyPayments, houseBills, income, shopping, myBills, adjustments } = params;
+  const {
+    cards,
+    monthlyPayments,
+    houseBills,
+    income,
+    shopping,
+    myBills,
+    adjustments,
+    loanedOutItems,
+    baseBankBalance
+  } = params;
   const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
 
   const baseIncomeTotal = totalLineItems(income);
@@ -189,6 +225,7 @@ export function computeMonthSnapshots(params: {
   const baseMyBillsTotal = totalLineItems(myBills);
   const cardProjections = computeCardMonthProjections(cards, timelinePayments);
   const cardProjectionsByMonth = new Map(cardProjections.map((projection) => [projection.month, projection]));
+  let cumulativeMoneyLeft = 0;
 
   return timelinePayments
     .slice()
@@ -220,6 +257,21 @@ export function computeMonthSnapshots(params: {
         myBillsTotal,
         formulaVariantId: payment.formulaVariantId
       });
+      cumulativeMoneyLeft = normalizeCurrency(cumulativeMoneyLeft + moneyLeft);
+
+      const loanedOutOutstandingTotal = normalizeCurrency(
+        loanedOutItems
+          .filter((loan) => isLoanActiveForMonth(payment.month, loan))
+          .reduce((acc, loan) => acc + loan.amount, 0)
+      );
+      const loanedOutPaidBackTotal = normalizeCurrency(
+        loanedOutItems
+          .filter((loan) => isLoanPaidBackByMonth(payment.month, loan))
+          .reduce((acc, loan) => acc + loan.amount, 0)
+      );
+      const moneyInBank = normalizeCurrency(
+        normalizeCurrency(baseBankBalance) + cumulativeMoneyLeft - loanedOutOutstandingTotal
+      );
 
       const now = new Date().toISOString();
       return {
@@ -232,6 +284,9 @@ export function computeMonthSnapshots(params: {
         cardInterestTotal,
         cardBalanceTotal,
         cardSpendTotal,
+        loanedOutOutstandingTotal,
+        loanedOutPaidBackTotal,
+        moneyInBank,
         moneyLeft,
         formulaVariantId: payment.formulaVariantId,
         inferred: payment.inferred,

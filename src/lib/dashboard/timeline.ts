@@ -1,6 +1,14 @@
 import { daysInMonth } from "@/lib/cards/due-date";
 import { normalizeCurrency } from "@/lib/util/numbers";
-import { CardAccount, LineItem, MonthTimeline, MonthTimelineEvent, MonthlyAdjustment, MonthlyCardPayments } from "@/types";
+import {
+  CardAccount,
+  LineItem,
+  LoanedOutItem,
+  MonthTimeline,
+  MonthTimelineEvent,
+  MonthlyAdjustment,
+  MonthlyCardPayments
+} from "@/types";
 
 function parseMonthKey(month: string): { year: number; monthNumber: number } {
   const [yearRaw, monthRaw] = month.split("-");
@@ -58,8 +66,9 @@ export function buildMonthTimeline(params: {
   adjustments: Array<
     Pick<MonthlyAdjustment, "id" | "name" | "amount" | "category" | "startMonth" | "endMonth" | "dueDayOfMonth">
   >;
+  loanedOutItems: Array<Pick<LoanedOutItem, "id" | "name" | "amount" | "startMonth" | "status" | "paidBackMonth">>;
 }): MonthTimeline {
-  const { selectedMonth, cards, monthlyPayments, houseBills, shopping, myBills, adjustments } = params;
+  const { selectedMonth, cards, monthlyPayments, houseBills, shopping, myBills, adjustments, loanedOutItems } = params;
   const { year, monthNumber } = parseMonthKey(selectedMonth);
   const events: MonthTimelineEvent[] = [];
 
@@ -118,6 +127,42 @@ export function buildMonthTimeline(params: {
           monthNumber,
           dueDayOfMonth: adjustment.dueDayOfMonth ?? 1,
           amount: sign * Math.max(0, adjustment.amount)
+        })
+      );
+    });
+
+  loanedOutItems
+    .filter((loan) => loan.startMonth === selectedMonth)
+    .forEach((loan) => {
+      events.push(
+        toEvent({
+          id: `loaned-out-${loan.id}-${selectedMonth}`,
+          type: "adjustment",
+          title: `${loan.name} (loaned out)`,
+          subtitle: "Money loaned out",
+          category: "loanedOut",
+          year,
+          monthNumber,
+          dueDayOfMonth: 1,
+          amount: -Math.max(0, loan.amount)
+        })
+      );
+    });
+
+  loanedOutItems
+    .filter((loan) => loan.status === "paidBack" && loan.paidBackMonth === selectedMonth)
+    .forEach((loan) => {
+      events.push(
+        toEvent({
+          id: `loan-paid-back-${loan.id}-${selectedMonth}`,
+          type: "adjustment",
+          title: `${loan.name} (paid back)`,
+          subtitle: "Loan repayment received",
+          category: "loanedOut",
+          year,
+          monthNumber,
+          dueDayOfMonth: 1,
+          amount: Math.max(0, loan.amount)
         })
       );
     });

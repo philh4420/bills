@@ -34,6 +34,9 @@ interface DashboardData {
     cardInterestTotal: number;
     cardBalanceTotal: number;
     cardSpendTotal: number;
+    loanedOutOutstandingTotal: number;
+    loanedOutPaidBackTotal: number;
+    moneyInBank: number;
     moneyLeft: number;
     formulaVariantId: string;
     inferred: boolean;
@@ -46,6 +49,15 @@ interface DashboardData {
     formulaVariantId: string;
     inferred: boolean;
   } | null;
+  bankBalance: { id: string; amount: number } | null;
+  loanedOutItems: Array<{
+    id: string;
+    name: string;
+    amount: number;
+    startMonth: string;
+    status: "outstanding" | "paidBack";
+    paidBackMonth?: string;
+  }>;
   alertSettings: {
     lowMoneyLeftThreshold: number;
     utilizationThresholdPercent: number;
@@ -282,6 +294,12 @@ export default function DashboardPage() {
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <Metric label="Income" value={formatGBP(data.snapshot.incomeTotal)} />
+                <Metric label="Money In Bank" value={formatGBP(data.snapshot.moneyInBank)} />
+                <Metric
+                  label="Loaned Out (Outstanding)"
+                  value={formatGBP(data.snapshot.loanedOutOutstandingTotal)}
+                />
+                <Metric label="Loaned Out (Paid Back)" value={formatGBP(data.snapshot.loanedOutPaidBackTotal)} />
                 <Metric label="Card Spend" value={formatGBP(data.snapshot.cardSpendTotal)} />
                 <Metric label="Card Interest" value={formatGBP(data.snapshot.cardInterestTotal)} />
                 <Metric label="Card Balance" value={formatGBP(data.snapshot.cardBalanceTotal)} />
