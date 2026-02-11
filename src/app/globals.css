@@ -333,3 +333,108 @@ tbody tr:last-child td {
   font-size: 0.66rem;
   color: var(--ink-soft);
 }
+
+.mobile-edit-card {
+  border: 1px solid rgba(184, 171, 150, 0.38);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.82rem;
+}
+
+.mobile-edit-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mobile-edit-card-title {
+  color: var(--ink-main);
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.mobile-edit-card-subtitle {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  margin-top: 0.12rem;
+}
+
+.mobile-edit-keyvals {
+  margin-top: 0.68rem;
+  display: grid;
+  gap: 0.38rem;
+}
+
+.mobile-edit-keyval {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.mobile-edit-keyval-label {
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+}
+
+.mobile-edit-keyval-value {
+  color: var(--ink-main);
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.mobile-edit-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0.65rem;
+}
+
+.mobile-edit-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(20, 33, 54, 0.46);
+}
+
+.mobile-edit-drawer-sheet {
+  position: relative;
+  width: min(100%, 760px);
+  max-height: min(92vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mobile-edit-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(184, 171, 150, 0.38);
+  padding: 0.9rem 0.9rem 0.8rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.72));
+}
+
+.mobile-edit-drawer-body {
+  overflow-y: auto;
+  padding: 0.95rem;
+}
+
+.mobile-edit-drawer-footer {
+  border-top: 1px solid rgba(184, 171, 150, 0.38);
+  padding: 0.8rem 0.95rem 0.95rem;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+@media (min-width: 640px) {
+  .mobile-edit-drawer {
+    align-items: center;
+    padding: 1rem;
+  }
+}

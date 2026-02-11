@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { MobileEditDrawer } from "@/components/mobile-edit-drawer";
 import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
 import { authedRequest } from "@/lib/api/client";
@@ -76,6 +77,8 @@ function LineItemCollection({
   const [newDueDay, setNewDueDay] = useState("1");
   const [drafts, setDrafts] = useState<Record<string, Item>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [mobileEditId, setMobileEditId] = useState<string | null>(null);
+  const [mobileAddOpen, setMobileAddOpen] = useState(false);
 
   const query = useQuery({
     queryKey: [endpoint],
@@ -95,6 +98,18 @@ function LineItemCollection({
 
   const items = query.data?.items || [];
   const total = items.reduce((acc, item) => acc + item.amount, 0);
+
+  function getItemDraft(item: Item): Item {
+    return (
+      drafts[item.id] || {
+        ...item,
+        dueDayOfMonth: supportsDueDay ? (item.dueDayOfMonth ?? 1) : null
+      }
+    );
+  }
+
+  const mobileItem = mobileEditId ? items.find((entry) => entry.id === mobileEditId) || null : null;
+  const mobileDraft = mobileItem ? getItemDraft(mobileItem) : null;
 
   async function addItem() {
     if (!newName.trim()) {
@@ -155,101 +170,186 @@ function LineItemCollection({
       {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
       {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
 
-      <div className="space-y-3 lg:hidden">
+      <div className="space-y-3 xl:hidden">
         {items.map((item) => {
-          const draft = drafts[item.id] || item;
+          const draft = getItemDraft(item);
+          const dueLabel = supportsDueDay ? String(draft.dueDayOfMonth ?? "Not set") : null;
           return (
-            <div className="panel p-4" key={`mobile-${item.id}`}>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <p className="label">Name</p>
-                  <input
-                    className="input mt-1"
-                    value={draft.name}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: {
-                          ...prev[item.id],
-                          name: event.target.value
-                        }
-                      }))
-                    }
-                  />
+            <div className="mobile-edit-card" key={`mobile-${item.id}`}>
+              <div className="mobile-edit-card-head">
+                <div className="min-w-0">
+                  <p className="mobile-edit-card-title">{draft.name}</p>
+                  <p className="mobile-edit-card-subtitle">Monthly value: {formatGBP(draft.amount)}</p>
                 </div>
-                <div>
-                  <p className="label">Amount</p>
-                  <input
-                    className="input mt-1"
-                    type="number"
-                    step="0.01"
-                    value={draft.amount}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: {
-                          ...prev[item.id],
-                          amount: Number(event.target.value)
-                        }
-                      }))
-                    }
-                  />
+                <button className="button-secondary shrink-0" type="button" onClick={() => setMobileEditId(item.id)}>
+                  Edit
+                </button>
+              </div>
+              <div className="mobile-edit-keyvals">
+                <div className="mobile-edit-keyval">
+                  <span className="mobile-edit-keyval-label">Amount</span>
+                  <span className="mobile-edit-keyval-value">{formatGBP(draft.amount)}</span>
                 </div>
                 {supportsDueDay ? (
-                  <div>
-                    <p className="label">Due day</p>
-                    <select
-                      className="input mt-1"
-                      value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
-                      onChange={(event) =>
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [item.id]: {
-                            ...prev[item.id],
-                            dueDayOfMonth: parseDueDayInput(event.target.value)
-                          }
-                        }))
-                      }
-                    >
-                      <option value="">Not set</option>
-                      {DUE_DAY_OPTIONS.map((day) => (
-                        <option key={`mobile-line-due-${item.id}-${day}`} value={day}>
-                          {day}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="mobile-edit-keyval">
+                    <span className="mobile-edit-keyval-label">Due day</span>
+                    <span className="mobile-edit-keyval-value">{dueLabel}</span>
                   </div>
                 ) : null}
-                <div className="flex items-end text-xs text-[var(--ink-soft)]">
-                  Monthly value: {formatGBP(draft.amount)}
-                </div>
-              </div>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => saveItem(item.id)}>
-                  Save
-                </button>
-                <button className="button-danger w-full sm:w-auto" type="button" onClick={() => deleteItem(item.id)}>
-                  Delete
-                </button>
               </div>
             </div>
           );
         })}
 
-        <div className="panel p-4">
-          <p className="label">Add item</p>
-          <div className="mt-2 grid gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2">
+        <button className="button-primary w-full" type="button" onClick={() => setMobileAddOpen(true)}>
+          Add item
+        </button>
+
+        <MobileEditDrawer
+          open={Boolean(mobileItem && mobileDraft)}
+          title={mobileItem ? `Edit ${mobileItem.name}` : "Edit item"}
+          subtitle="Update this monthly entry."
+          onClose={() => setMobileEditId(null)}
+          footer={
+            <div className="flex flex-col gap-2">
+              {mobileItem ? (
+                <button
+                  className="button-danger w-full sm:w-auto"
+                  type="button"
+                  onClick={async () => {
+                    await deleteItem(mobileItem.id);
+                    setMobileEditId(null);
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => setMobileEditId(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="button-primary w-full sm:w-auto"
+                  type="button"
+                  onClick={async () => {
+                    if (!mobileItem) {
+                      return;
+                    }
+                    await saveItem(mobileItem.id);
+                    setMobileEditId(null);
+                  }}
+                >
+                  Save item
+                </button>
+              </div>
+            </div>
+          }
+        >
+          {mobileItem && mobileDraft ? (
+            <div className="grid gap-3">
+              <div>
+                <p className="label">Name</p>
+                <input
+                  className="input mt-1"
+                  value={mobileDraft.name}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: {
+                        ...mobileDraft,
+                        name: event.target.value
+                      }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">Amount</p>
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step="0.01"
+                  value={mobileDraft.amount}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: {
+                        ...mobileDraft,
+                        amount: Number(event.target.value)
+                      }
+                    }))
+                  }
+                />
+              </div>
+              {supportsDueDay ? (
+                <div>
+                  <p className="label">Due day</p>
+                  <select
+                    className="input mt-1"
+                    value={mobileDraft.dueDayOfMonth ? String(mobileDraft.dueDayOfMonth) : ""}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [mobileItem.id]: {
+                          ...mobileDraft,
+                          dueDayOfMonth: parseDueDayInput(event.target.value)
+                        }
+                      }))
+                    }
+                  >
+                    <option value="">Not set</option>
+                    {DUE_DAY_OPTIONS.map((day) => (
+                      <option key={`drawer-line-due-${mobileItem.id}-${day}`} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </MobileEditDrawer>
+
+        <MobileEditDrawer
+          open={mobileAddOpen}
+          title={`Add ${title}`}
+          subtitle="Create a new monthly entry."
+          onClose={() => setMobileAddOpen(false)}
+          footer={
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => setMobileAddOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="button-primary w-full sm:w-auto"
+                type="button"
+                onClick={async () => {
+                  if (!newName.trim()) {
+                    return;
+                  }
+                  await addItem();
+                  setMobileAddOpen(false);
+                }}
+              >
+                Add item
+              </button>
+            </div>
+          }
+        >
+          <div className="grid gap-3">
+            <div>
+              <p className="label">Name</p>
               <input
-                className="input"
+                className="input mt-1"
                 placeholder="New item"
                 value={newName}
                 onChange={(event) => setNewName(event.target.value)}
               />
             </div>
             <div>
+              <p className="label">Amount</p>
               <input
-                className="input"
+                className="input mt-1"
                 type="number"
                 step="0.01"
                 value={newAmount}
@@ -258,11 +358,8 @@ function LineItemCollection({
             </div>
             {supportsDueDay ? (
               <div>
-                <select
-                  className="input"
-                  value={newDueDay}
-                  onChange={(event) => setNewDueDay(event.target.value)}
-                >
+                <p className="label">Due day</p>
+                <select className="input mt-1" value={newDueDay} onChange={(event) => setNewDueDay(event.target.value)}>
                   <option value="">Due day</option>
                   {DUE_DAY_OPTIONS.map((day) => (
                     <option key={`new-line-due-${endpoint}-${day}`} value={day}>
@@ -272,16 +369,11 @@ function LineItemCollection({
                 </select>
               </div>
             ) : null}
-            <div className="sm:self-end">
-              <button className="button-primary w-full sm:w-auto" type="button" onClick={() => addItem()}>
-                Add
-              </button>
-            </div>
           </div>
-        </div>
+        </MobileEditDrawer>
       </div>
 
-      <div className="table-wrap hidden lg:block">
+      <div className="table-wrap hidden xl:block">
         <table>
           <thead>
             <tr>
@@ -411,6 +503,8 @@ function LineItemCollection({
 function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
   const [message, setMessage] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, MonthlyAdjustment>>({});
+  const [mobileEditId, setMobileEditId] = useState<string | null>(null);
+  const [mobileAddOpen, setMobileAddOpen] = useState(false);
   const [newItem, setNewItem] = useState({
     name: "",
     amount: "0",
@@ -440,22 +534,34 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
   const adjustments = query.data?.adjustments || [];
   const total = adjustments.reduce((acc, item) => acc + item.amount, 0);
 
-  async function createItem() {
+  function getAdjustmentDraft(item: MonthlyAdjustment): MonthlyAdjustment {
+    return (
+      drafts[item.id] || {
+        ...item,
+        dueDayOfMonth: item.dueDayOfMonth ?? 1
+      }
+    );
+  }
+
+  const mobileItem = mobileEditId ? adjustments.find((entry) => entry.id === mobileEditId) || null : null;
+  const mobileDraft = mobileItem ? getAdjustmentDraft(mobileItem) : null;
+
+  async function createItem(): Promise<boolean> {
     if (!newItem.name.trim()) {
       setMessage("Name is required.");
-      return;
+      return false;
     }
 
     const startMonth = normalizeMonthInput(newItem.startMonth);
     if (!startMonth) {
       setMessage("Start month must be in YYYY-MM format.");
-      return;
+      return false;
     }
 
     const endMonth = newItem.endMonth ? normalizeMonthInput(newItem.endMonth) : null;
     if (newItem.endMonth && !endMonth) {
       setMessage("End month must be in YYYY-MM format.");
-      return;
+      return false;
     }
 
     setMessage(null);
@@ -482,27 +588,29 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       });
       setMessage("Created monthly adjustment");
       await query.refetch();
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to create adjustment");
+      return false;
     }
   }
 
-  async function saveItem(id: string) {
+  async function saveItem(id: string): Promise<boolean> {
     const item = drafts[id];
     if (!item) {
-      return;
+      return false;
     }
 
     const startMonth = normalizeMonthInput(item.startMonth);
     if (!startMonth) {
       setMessage("Start month must be in YYYY-MM format.");
-      return;
+      return false;
     }
 
     const endMonth = item.endMonth ? normalizeMonthInput(item.endMonth) : null;
     if (item.endMonth && !endMonth) {
       setMessage("End month must be in YYYY-MM format.");
-      return;
+      return false;
     }
 
     setMessage(null);
@@ -520,12 +628,14 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       });
       setMessage("Saved monthly adjustment");
       await query.refetch();
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save adjustment");
+      return false;
     }
   }
 
-  async function deleteItem(id: string) {
+  async function deleteItem(id: string): Promise<boolean> {
     setMessage(null);
     try {
       await authedRequest(getIdToken, `/api/monthly-adjustments/${id}`, {
@@ -533,8 +643,10 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       });
       setMessage("Deleted monthly adjustment");
       await query.refetch();
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to delete adjustment");
+      return false;
     }
   }
 
@@ -547,136 +659,232 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
       {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
 
-      <div className="space-y-3 lg:hidden">
+      <div className="space-y-3 xl:hidden">
         {adjustments.map((item) => {
-          const draft = drafts[item.id] || item;
+          const draft = getAdjustmentDraft(item);
+          const rangeLabel = draft.endMonth ? `${draft.startMonth} to ${draft.endMonth}` : `${draft.startMonth} onward`;
           return (
-            <div className="panel p-4" key={`mobile-adjustment-${item.id}`}>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <p className="label">Name</p>
-                  <input
-                    className="input mt-1"
-                    value={draft.name}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: { ...prev[item.id], name: event.target.value }
-                      }))
-                    }
-                  />
+            <div className="mobile-edit-card" key={`mobile-adjustment-${item.id}`}>
+              <div className="mobile-edit-card-head">
+                <div className="min-w-0">
+                  <p className="mobile-edit-card-title">{draft.name}</p>
+                  <p className="mobile-edit-card-subtitle">{rangeLabel}</p>
                 </div>
-                <div>
-                  <p className="label">Category</p>
-                  <select
-                    className="input mt-1"
-                    value={draft.category}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: {
-                          ...prev[item.id],
-                          category: event.target.value as MonthlyAdjustment["category"]
-                        }
-                      }))
-                    }
-                  >
-                    <option value="houseBills">houseBills</option>
-                    <option value="shopping">shopping</option>
-                    <option value="myBills">myBills</option>
-                    <option value="income">income</option>
-                  </select>
-                </div>
-                <div>
-                  <p className="label">Amount</p>
-                  <input
-                    className="input mt-1"
-                    type="number"
-                    step="0.01"
-                    value={draft.amount}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: { ...prev[item.id], amount: Number(event.target.value) }
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <p className="label">Start</p>
-                  <input
-                    className="input mt-1"
-                    type="month"
-                    value={draft.startMonth}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: { ...prev[item.id], startMonth: event.target.value }
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <p className="label">End (optional)</p>
-                  <input
-                    className="input mt-1"
-                    type="month"
-                    value={draft.endMonth || ""}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: { ...prev[item.id], endMonth: event.target.value }
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <p className="label">Due day</p>
-                  <select
-                    className="input mt-1"
-                    value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
-                    onChange={(event) =>
-                      setDrafts((prev) => ({
-                        ...prev,
-                        [item.id]: { ...prev[item.id], dueDayOfMonth: parseDueDayInput(event.target.value) }
-                      }))
-                    }
-                  >
-                    <option value="">Not set</option>
-                    {DUE_DAY_OPTIONS.map((day) => (
-                      <option key={`mobile-adjustment-due-${item.id}-${day}`} value={day}>
-                        {day}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <button className="button-secondary shrink-0" type="button" onClick={() => setMobileEditId(item.id)}>
+                  Edit
+                </button>
               </div>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => saveItem(item.id)}>
-                  Save
-                </button>
-                <button className="button-danger w-full sm:w-auto" type="button" onClick={() => deleteItem(item.id)}>
-                  Delete
-                </button>
+              <div className="mobile-edit-keyvals">
+                <div className="mobile-edit-keyval">
+                  <span className="mobile-edit-keyval-label">Category</span>
+                  <span className="mobile-edit-keyval-value">{draft.category}</span>
+                </div>
+                <div className="mobile-edit-keyval">
+                  <span className="mobile-edit-keyval-label">Amount</span>
+                  <span className="mobile-edit-keyval-value">{formatGBP(draft.amount)}</span>
+                </div>
+                <div className="mobile-edit-keyval">
+                  <span className="mobile-edit-keyval-label">Due day</span>
+                  <span className="mobile-edit-keyval-value">{draft.dueDayOfMonth || "Not set"}</span>
+                </div>
               </div>
             </div>
           );
         })}
 
-        <div className="panel p-4">
-          <p className="label">Add monthly adjustment</p>
-          <div className="mt-2 grid gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2">
+        <button className="button-primary w-full" type="button" onClick={() => setMobileAddOpen(true)}>
+          Add monthly adjustment
+        </button>
+
+        <MobileEditDrawer
+          open={Boolean(mobileItem && mobileDraft)}
+          title={mobileItem ? `Edit ${mobileItem.name}` : "Edit adjustment"}
+          subtitle="Update amount, range, and due day."
+          onClose={() => setMobileEditId(null)}
+          footer={
+            <div className="flex flex-col gap-2">
+              {mobileItem ? (
+                <button
+                  className="button-danger w-full sm:w-auto"
+                  type="button"
+                  onClick={async () => {
+                    const deleted = await deleteItem(mobileItem.id);
+                    if (deleted) {
+                      setMobileEditId(null);
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => setMobileEditId(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="button-primary w-full sm:w-auto"
+                  type="button"
+                  onClick={async () => {
+                    if (!mobileItem) {
+                      return;
+                    }
+                    const saved = await saveItem(mobileItem.id);
+                    if (saved) {
+                      setMobileEditId(null);
+                    }
+                  }}
+                >
+                  Save adjustment
+                </button>
+              </div>
+            </div>
+          }
+        >
+          {mobileItem && mobileDraft ? (
+            <div className="grid gap-3">
+              <div>
+                <p className="label">Name</p>
+                <input
+                  className="input mt-1"
+                  value={mobileDraft.name}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, name: event.target.value }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">Category</p>
+                <select
+                  className="input mt-1"
+                  value={mobileDraft.category}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: {
+                        ...mobileDraft,
+                        category: event.target.value as MonthlyAdjustment["category"]
+                      }
+                    }))
+                  }
+                >
+                  <option value="houseBills">houseBills</option>
+                  <option value="shopping">shopping</option>
+                  <option value="myBills">myBills</option>
+                  <option value="income">income</option>
+                </select>
+              </div>
+              <div>
+                <p className="label">Amount</p>
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step="0.01"
+                  value={mobileDraft.amount}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, amount: Number(event.target.value) }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">Start</p>
+                <input
+                  className="input mt-1"
+                  type="month"
+                  value={mobileDraft.startMonth}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, startMonth: event.target.value }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">End (optional)</p>
+                <input
+                  className="input mt-1"
+                  type="month"
+                  value={mobileDraft.endMonth || ""}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: { ...mobileDraft, endMonth: event.target.value }
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <p className="label">Due day</p>
+                <select
+                  className="input mt-1"
+                  value={mobileDraft.dueDayOfMonth ? String(mobileDraft.dueDayOfMonth) : ""}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [mobileItem.id]: {
+                        ...mobileDraft,
+                        dueDayOfMonth: parseDueDayInput(event.target.value)
+                      }
+                    }))
+                  }
+                >
+                  <option value="">Not set</option>
+                  {DUE_DAY_OPTIONS.map((day) => (
+                    <option key={`drawer-adjustment-due-${mobileItem.id}-${day}`} value={day}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ) : null}
+        </MobileEditDrawer>
+
+        <MobileEditDrawer
+          open={mobileAddOpen}
+          title="Add monthly adjustment"
+          subtitle="Create extra charges or credits by month range."
+          onClose={() => setMobileAddOpen(false)}
+          footer={
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => setMobileAddOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="button-primary w-full sm:w-auto"
+                type="button"
+                onClick={async () => {
+                  const created = await createItem();
+                  if (created) {
+                    setMobileAddOpen(false);
+                  }
+                }}
+              >
+                Add adjustment
+              </button>
+            </div>
+          }
+        >
+          <div className="grid gap-3">
+            <div>
+              <p className="label">Name</p>
               <input
-                className="input"
+                className="input mt-1"
                 value={newItem.name}
                 placeholder="New adjustment"
                 onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
               />
             </div>
             <div>
+              <p className="label">Category</p>
               <select
-                className="input"
+                className="input mt-1"
                 value={newItem.category}
                 onChange={(event) =>
                   setNewItem((prev) => ({
@@ -692,8 +900,9 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
               </select>
             </div>
             <div>
+              <p className="label">Amount</p>
               <input
-                className="input"
+                className="input mt-1"
                 type="number"
                 step="0.01"
                 value={newItem.amount}
@@ -701,26 +910,27 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
               />
             </div>
             <div>
+              <p className="label">Start month</p>
               <input
-                className="input"
+                className="input mt-1"
                 type="month"
                 value={newItem.startMonth}
-                onChange={(event) =>
-                  setNewItem((prev) => ({ ...prev, startMonth: event.target.value }))
-                }
+                onChange={(event) => setNewItem((prev) => ({ ...prev, startMonth: event.target.value }))}
               />
             </div>
             <div>
+              <p className="label">End month</p>
               <input
-                className="input"
+                className="input mt-1"
                 type="month"
                 value={newItem.endMonth}
                 onChange={(event) => setNewItem((prev) => ({ ...prev, endMonth: event.target.value }))}
               />
             </div>
             <div>
+              <p className="label">Due day</p>
               <select
-                className="input"
+                className="input mt-1"
                 value={newItem.dueDayOfMonth}
                 onChange={(event) =>
                   setNewItem((prev) => ({
@@ -737,16 +947,11 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
                 ))}
               </select>
             </div>
-            <div className="sm:col-span-2">
-              <button className="button-primary w-full sm:w-auto" type="button" onClick={() => createItem()}>
-                Add
-              </button>
-            </div>
           </div>
-        </div>
+        </MobileEditDrawer>
       </div>
 
-      <div className="table-wrap hidden lg:block">
+      <div className="table-wrap hidden xl:block">
         <table>
           <thead>
             <tr>

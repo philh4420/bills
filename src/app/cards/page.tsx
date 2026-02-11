@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
+import { MobileEditDrawer } from "@/components/mobile-edit-drawer";
 import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
 import { authedRequest } from "@/lib/api/client";
@@ -36,6 +37,8 @@ interface MonthlyList {
 interface VapidPublicKeyResponse {
   publicKey: string;
 }
+
+type CardRecord = CardData["cards"][number];
 
 type DueTone = "neutral" | "ok" | "warn" | "danger";
 
@@ -142,6 +145,7 @@ export default function CardsPage() {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<string>("default");
+  const [mobileCardEditId, setMobileCardEditId] = useState<string | null>(null);
 
   const cardsQuery = useQuery({
     queryKey: ["cards"],
@@ -372,6 +376,22 @@ export default function CardsPage() {
     }
   }
 
+  function getCardDraft(card: CardRecord) {
+    return (
+      cardDrafts[card.id] || {
+        limit: card.limit,
+        usedLimit: card.usedLimit,
+        interestRateApr: card.interestRateApr ?? 0,
+        dueDayOfMonth: card.dueDayOfMonth ?? null
+      }
+    );
+  }
+
+  const cards = cardsQuery.data?.cards || [];
+  const mobileCard = mobileCardEditId ? cards.find((entry) => entry.id === mobileCardEditId) || null : null;
+  const mobileCardDraft = mobileCard ? getCardDraft(mobileCard) : null;
+  const mobileCardDueMeta = mobileCardDraft ? getDueMeta(mobileCardDraft.dueDayOfMonth) : null;
+
   return (
     <ProtectedPage title="Cards & Monthly Payments">
       <div className="space-y-4">
@@ -382,111 +402,172 @@ export default function CardsPage() {
           {cardsQuery.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading cards...</p> : null}
           {cardsQuery.error ? <p className="text-sm text-red-700">{(cardsQuery.error as Error).message}</p> : null}
 
-          <div className="space-y-3 md:hidden">
-            {(cardsQuery.data?.cards || []).map((card) => {
-              const draft = cardDrafts[card.id] || {
-                limit: card.limit,
-                usedLimit: card.usedLimit,
-                interestRateApr: card.interestRateApr ?? 0,
-                dueDayOfMonth: card.dueDayOfMonth ?? null
-              };
+          <div className="space-y-3 xl:hidden">
+            {cards.map((card) => {
+              const draft = getCardDraft(card);
               const available = draft.limit - draft.usedLimit;
               const projection = activeProjection?.entries[card.id];
               const dueMeta = getDueMeta(draft.dueDayOfMonth);
 
               return (
-                <div className="panel p-4" key={`mobile-${card.id}`}>
-                  <p className="text-sm font-semibold text-[var(--ink-main)]">{card.name}</p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <p className="label">Limit</p>
-                      <input
-                        className="input mt-1"
-                        type="number"
-                        step="0.01"
-                        value={draft.limit}
-                        onChange={(event) =>
-                          setCardDrafts((prev) => ({
-                            ...prev,
-                            [card.id]: { ...draft, limit: Number(event.target.value) }
-                          }))
-                        }
-                      />
+                <div className="mobile-edit-card" key={`mobile-${card.id}`}>
+                  <div className="mobile-edit-card-head">
+                    <div className="min-w-0">
+                      <p className="mobile-edit-card-title">{card.name}</p>
+                      <p className="mobile-edit-card-subtitle">
+                        {dueMeta.statusLabel} · {dueMeta.detailLabel}
+                      </p>
                     </div>
-                    <div>
-                      <p className="label">Used</p>
-                      <input
-                        className="input mt-1"
-                        type="number"
-                        step="0.01"
-                        value={draft.usedLimit}
-                        onChange={(event) =>
-                          setCardDrafts((prev) => ({
-                            ...prev,
-                            [card.id]: { ...draft, usedLimit: Number(event.target.value) }
-                          }))
-                        }
-                      />
+                    <button className="button-secondary shrink-0" type="button" onClick={() => setMobileCardEditId(card.id)}>
+                      Edit
+                    </button>
+                  </div>
+                  <div className="mobile-edit-keyvals">
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Limit</span>
+                      <span className="mobile-edit-keyval-value">{formatGBP(draft.limit)}</span>
                     </div>
-                    <div>
-                      <p className="label">APR %</p>
-                      <input
-                        className="input mt-1"
-                        type="number"
-                        step="0.01"
-                        value={draft.interestRateApr}
-                        onChange={(event) =>
-                          setCardDrafts((prev) => ({
-                            ...prev,
-                            [card.id]: { ...draft, interestRateApr: Number(event.target.value) }
-                          }))
-                        }
-                      />
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Used</span>
+                      <span className="mobile-edit-keyval-value">{formatGBP(draft.usedLimit)}</span>
                     </div>
-                    <div>
-                      <p className="label">Due day (1-31)</p>
-                      <select
-                        className="input mt-1"
-                        value={draft.dueDayOfMonth ? String(draft.dueDayOfMonth) : ""}
-                        onChange={(event) =>
-                          setCardDrafts((prev) => ({
-                            ...prev,
-                            [card.id]: {
-                              ...draft,
-                              dueDayOfMonth: parseDueDayInput(event.target.value)
-                            }
-                          }))
-                        }
-                      >
-                        <option value="">Not set</option>
-                        {DUE_DAY_OPTIONS.map((day) => (
-                          <option key={`${card.id}-due-${day}`} value={day}>
-                            {day}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">APR</span>
+                      <span className="mobile-edit-keyval-value">{draft.interestRateApr.toFixed(2)}%</span>
                     </div>
-                    <div className="grid grid-cols-1 gap-2 text-sm text-[var(--ink-soft)] sm:col-span-2">
-                      <p>Available: {formatGBP(available)}</p>
-                      <p>Interest ({month || "month"}): {formatGBP(projection?.interestAdded ?? 0)}</p>
-                      <p>Projected used: {formatGBP(projection?.closingBalance ?? draft.usedLimit)}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${dueToneClass(dueMeta.tone)}`}>
-                          {dueMeta.statusLabel}
-                        </span>
-                        <span className="text-xs text-[var(--ink-soft)]">{dueMeta.detailLabel}</span>
-                      </div>
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Available</span>
+                      <span className="mobile-edit-keyval-value">{formatGBP(available)}</span>
+                    </div>
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Interest ({month || "month"})</span>
+                      <span className="mobile-edit-keyval-value">{formatGBP(projection?.interestAdded ?? 0)}</span>
+                    </div>
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Projected used ({month || "month"})</span>
+                      <span className="mobile-edit-keyval-value">
+                        {formatGBP(projection?.closingBalance ?? draft.usedLimit)}
+                      </span>
                     </div>
                   </div>
-                  <button className="button-secondary mt-3 w-full" type="button" onClick={() => saveCard(card.id)}>
-                    Save {card.name}
-                  </button>
                 </div>
               );
             })}
+
+            <MobileEditDrawer
+              open={Boolean(mobileCard && mobileCardDraft)}
+              title={mobileCard ? `Edit ${mobileCard.name}` : "Edit card"}
+              subtitle={`Update card details for ${month || "selected month"}.`}
+              onClose={() => setMobileCardEditId(null)}
+              footer={
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <button className="button-secondary w-full sm:w-auto" type="button" onClick={() => setMobileCardEditId(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    className="button-primary w-full sm:w-auto"
+                    type="button"
+                    onClick={async () => {
+                      if (!mobileCard) {
+                        return;
+                      }
+                      await saveCard(mobileCard.id);
+                      setMobileCardEditId(null);
+                    }}
+                  >
+                    Save card
+                  </button>
+                </div>
+              }
+            >
+              {mobileCard && mobileCardDraft ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <p className="label">Limit</p>
+                    <input
+                      className="input mt-1"
+                      type="number"
+                      step="0.01"
+                      value={mobileCardDraft.limit}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: { ...mobileCardDraft, limit: Number(event.target.value) }
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <p className="label">Used</p>
+                    <input
+                      className="input mt-1"
+                      type="number"
+                      step="0.01"
+                      value={mobileCardDraft.usedLimit}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: { ...mobileCardDraft, usedLimit: Number(event.target.value) }
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <p className="label">APR %</p>
+                    <input
+                      className="input mt-1"
+                      type="number"
+                      step="0.01"
+                      value={mobileCardDraft.interestRateApr}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: { ...mobileCardDraft, interestRateApr: Number(event.target.value) }
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <p className="label">Due day (1-31)</p>
+                    <select
+                      className="input mt-1"
+                      value={mobileCardDraft.dueDayOfMonth ? String(mobileCardDraft.dueDayOfMonth) : ""}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: {
+                            ...mobileCardDraft,
+                            dueDayOfMonth: parseDueDayInput(event.target.value)
+                          }
+                        }))
+                      }
+                    >
+                      <option value="">Not set</option>
+                      {DUE_DAY_OPTIONS.map((day) => (
+                        <option key={`${mobileCard.id}-drawer-due-${day}`} value={day}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${dueToneClass(
+                          mobileCardDueMeta?.tone || "neutral"
+                        )}`}
+                      >
+                        {mobileCardDueMeta?.statusLabel || "Not set"}
+                      </span>
+                      <span className="text-xs text-[var(--ink-soft)]">{mobileCardDueMeta?.detailLabel || ""}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </MobileEditDrawer>
           </div>
 
-          <div className="table-wrap hidden md:block">
+          <div className="table-wrap hidden xl:block">
             <table className="w-full table-fixed">
               <colgroup>
                 <col style={{ width: "13%" }} />
@@ -515,13 +596,8 @@ export default function CardsPage() {
                 </tr>
               </thead>
               <tbody>
-                {(cardsQuery.data?.cards || []).map((card) => {
-                  const draft = cardDrafts[card.id] || {
-                    limit: card.limit,
-                    usedLimit: card.usedLimit,
-                    interestRateApr: card.interestRateApr ?? 0,
-                    dueDayOfMonth: card.dueDayOfMonth ?? null
-                  };
+                {cards.map((card) => {
+                  const draft = getCardDraft(card);
                   const available = draft.limit - draft.usedLimit;
                   const projection = activeProjection?.entries[card.id];
                   const dueMeta = getDueMeta(draft.dueDayOfMonth);
