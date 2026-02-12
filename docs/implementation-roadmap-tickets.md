@@ -233,8 +233,7 @@ This is the execution checklist version of the roadmap. Each ticket includes API
   - “Repair subscription” action in push reminders section.
 - Firestore schema:
   - Reuse `pushSubscriptions`; update health and refreshed endpoint metadata.
-- Tests:
-  - Repair flow behavior for stale, missing, and healthy subscription states.
+
 
 ### Phase v1.2-D - Data Portability and Recovery
 
@@ -261,8 +260,6 @@ This is the execution checklist version of the roadmap. Each ticket includes API
   - Backup/restore panel with upload, preview summary, and confirm restore.
 - Firestore schema:
   - Optional `users/{uid}/backups/{backupId}` metadata for restore history.
-- Tests:
-  - Restore validation checks and post-restore recompute consistency.
 
 ### v1.2 Release Gate (Must All Pass)
 - Gate 1:
@@ -283,8 +280,6 @@ This is the execution checklist version of the roadmap. Each ticket includes API
   - Read-only timeline page.
 - Firestore schema:
   - `users/{uid}/auditEvents/{eventId}` with before/after payload metadata.
-- Tests:
-  - Coverage for all write endpoints emitting events.
 
 ### BIL-202 - Reversible Command Layer
 - API:
@@ -293,8 +288,6 @@ This is the execution checklist version of the roadmap. Each ticket includes API
   - Hidden/advanced until undo UI ships.
 - Firestore schema:
   - `users/{uid}/commands/{commandId}`.
-- Tests:
-  - Command replay/revert tests.
 
 ### BIL-203 - Undo APIs and Safeguards
 - API:
@@ -303,8 +296,6 @@ This is the execution checklist version of the roadmap. Each ticket includes API
   - Undo action in history items.
 - Firestore schema:
   - Reuse commands/audit.
-- Tests:
-  - Undo correctness and lock protection tests.
 
 ### BIL-204 - Edit History UI
 - API:
@@ -313,8 +304,6 @@ This is the execution checklist version of the roadmap. Each ticket includes API
   - Filterable history screen by entity/month.
 - Firestore schema:
   - No new schema.
-- Tests:
-  - UI filter/pagination tests.
 
 ### BIL-205 - Retention + Performance Hardening
 - API:
@@ -323,5 +312,44 @@ This is the execution checklist version of the roadmap. Each ticket includes API
   - Archive status indicators.
 - Firestore schema:
   - Optional archive collections.
-- Tests:
-  - Load tests and query index validation.
+
+-----------------------------------------
+## Best Features to Add
+1. Debt payoff planner (snowball/avalanche) using your real cards/APR/payment plan.
+2. Savings goals/sinking funds (annual bills, holidays, repairs) with monthly target amounts.
+3. Net worth page (bank + cash - card/debt + loaned-out recovery).
+4. Scenario mode (“what if I add/remove X bill/income?”) without changing live data.
+5. Calendar improvements: drag/drop due days and week-level cash pressure heatmap.
+6. Subscription intelligence: detect high-cost recurring services and suggest lower-cost swaps.
+7. Multi-account bank support (main/current/savings) with transfers.
+8. “Payday mode” for 4-week cycles that auto-generates shifted pay dates.
+9. Installable PWA polish: offline edit queue, sync status, conflict handling.
+10. Lightweight analytics: monthly trend comparisons and category drift alerts.
+11. turn this into a phased roadmap (v1.1, v1.2, v2) with exact build order.
+
+Phased Roadmap (No Code Yet)
+
+v1.1: Planning Core + Visibility
+Implement Payday mode (4-week cycle) engine and month auto-shift logic (Feature 8).
+Add Savings goals / sinking funds data model + monthly contribution targets (Feature 2).
+Build Debt payoff planner (snowball + avalanche) using real card balances/APR/min payments (Feature 1).
+Add Net worth page v1: total bank/cash - debts + loaned-out recovery (Feature 3).
+Add Lightweight analytics v1: month-over-month comparisons and category drift alerts (Feature 10).
+Wire all new outputs into dashboard summaries and monthly projections (read-only first).
+
+## These ae still to add
+
+v1.2: Simulation + Calendar + Accounts
+Add multi-account bank support (current/savings/cash) and internal transfer flows (Feature 7).
+Update net worth/dashboard to aggregate by account and show transfer-aware balances.
+Add Scenario mode (sandbox “what-if” runs) without writing live data (Feature 4).
+Upgrade calendar to week cash-pressure heatmap (Feature 5).
+Add calendar drag/drop due-day editor with immediate projection refresh (Feature 5).
+Add subscription intelligence: recurring-cost ranking + lower-cost swap suggestions (Feature 6).
+
+v2: Reliability + PWA Experience
+Implement offline edit queue (queued writes + replay on reconnect) (Feature 9).
+Add sync status UI (queued, syncing, failed, last sync) (Feature 9).
+Add conflict detection/resolution for offline-vs-server edits (Feature 9).
+Make planner/scenario/calendar actions fully offline-safe with eventual consistency.
+Hardening pass: performance tuning, telemetry, edge-case validation, UX polish across all new features.

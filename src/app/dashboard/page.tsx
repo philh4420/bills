@@ -3,8 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Tooltip, XAxis, YAxis } from "recharts";
 
+import { MeasuredChart } from "@/components/measured-chart";
 import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
 import {
@@ -682,9 +683,9 @@ export default function DashboardPage() {
 
               <div className="panel p-4">
                 <p className="label">Cashflow shape ({formatMonthKeyUK(data.snapshot.month)})</p>
-                <div className="mt-4 h-56 sm:h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData}>
+                <MeasuredChart className="mt-4 h-56 w-full min-w-0 sm:h-72" minHeight={220}>
+                  {({ width, height }) => (
+                    <AreaChart width={width} height={height} data={chartData}>
                       <XAxis dataKey="name" tick={{ fill: "#556273", fontSize: 12 }} />
                       <YAxis tick={{ fill: "#556273", fontSize: 12 }} />
                       <Tooltip formatter={(value) => formatGBP(Number(value ?? 0))} />
@@ -702,8 +703,8 @@ export default function DashboardPage() {
                         </linearGradient>
                       </defs>
                     </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+                  )}
+                </MeasuredChart>
                 <p className="mt-2 text-xs text-[var(--ink-soft)]">
                   Formula Variant: {data.snapshot.formulaVariantId}
                   {data.snapshot.inferred ? " (inferred month)" : ""}
