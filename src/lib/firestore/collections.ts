@@ -11,6 +11,10 @@ export const COLLECTIONS = {
   bankBalances: "bankBalances",
   purchasePlans: "purchasePlans",
   monthSnapshots: "monthSnapshots",
+  ledgerEntries: "ledgerEntries",
+  recurrenceRules: "recurrenceRules",
+  monthClosures: "monthClosures",
+  reconciliations: "reconciliations",
   imports: "imports",
   pushSubscriptions: "pushSubscriptions",
   alertSettings: "alertSettings"

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
 import { loanedOutCreateSchema } from "@/lib/api/schemas";
+import { assertMonthRangeEditableWithFuture, parseLockedMonthFromError } from "@/lib/firestore/month-lock";
 import { recomputeAndPersistSnapshots } from "@/lib/firestore/recompute";
 import { createLoanedOutItem, listLoanedOutItems } from "@/lib/firestore/repository";
 import { toIsoNow } from "@/lib/util/dates";
@@ -22,6 +23,23 @@ export async function POST(request: NextRequest) {
 
     if (!parsed.success) {
       return jsonError(400, "Invalid payload", formatZodError(parsed.error));
+    }
+
+    try {
+      await assertMonthRangeEditableWithFuture(
+        uid,
+        parsed.data.startMonth,
+        parsed.data.status === "paidBack" ? parsed.data.paidBackMonth : undefined
+      );
+    } catch (error) {
+      const lockedMonth = parseLockedMonthFromError(error);
+      if (lockedMonth) {
+        return jsonError(423, `Month ${lockedMonth} is closed. Reopen it in reconciliation before editing.`, {
+          code: "MONTH_LOCKED",
+          month: lockedMonth
+        });
+      }
+      throw error;
     }
 
     const now = toIsoNow();

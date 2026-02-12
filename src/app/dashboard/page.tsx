@@ -10,7 +10,7 @@ import {
   DEFAULT_CARD_UTILIZATION_THRESHOLD,
   DEFAULT_LOW_MONEY_LEFT_THRESHOLD
 } from "@/lib/alerts/settings";
-import { authedRequest } from "@/lib/api/client";
+import { authedRequest, formatApiClientError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
 import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
@@ -62,6 +62,41 @@ interface DashboardData {
     status: "outstanding" | "paidBack";
     paidBackMonth?: string;
   }>;
+  ledgerEntries: Array<{
+    id: string;
+    month: string;
+    date: string;
+    day: number;
+    title: string;
+    subtitle?: string;
+    category: string;
+    amount: number;
+    status: "planned" | "posted" | "paid";
+  }>;
+  monthClosure: {
+    id: string;
+    month: string;
+    closed: boolean;
+    reason?: string;
+    closedAt?: string;
+    closedBy?: string;
+  } | null;
+  reconciliation: {
+    id: string;
+    month: string;
+    expectedBalance: number;
+    actualBalance: number;
+    variance: number;
+    status: "matched" | "variance";
+    notes?: string;
+    reconciledAt: string;
+  } | null;
+  bankFlow: {
+    openingBalance: number;
+    plannedToDate: number;
+    actualToDate: number;
+    usingActual: boolean;
+  };
   alertSettings: {
     lowMoneyLeftThreshold: number;
     utilizationThresholdPercent: number;
@@ -120,6 +155,13 @@ function severityClass(severity: "info" | "warning" | "critical"): string {
     return "border border-amber-200 bg-amber-50 text-amber-800";
   }
   return "border border-blue-200 bg-blue-50 text-blue-800";
+}
+
+function reconciliationStatusClass(status: "matched" | "variance"): string {
+  if (status === "matched") {
+    return "border border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+  return "border border-amber-200 bg-amber-50 text-amber-800";
 }
 
 function timelineChipClass(type: TimelineEvent["type"]): string {
@@ -208,6 +250,12 @@ export default function DashboardPage() {
   });
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [reconciliationActual, setReconciliationActual] = useState("");
+  const [reconciliationNotes, setReconciliationNotes] = useState("");
+  const [reconciliationMessage, setReconciliationMessage] = useState<string | null>(null);
+  const [closureReason, setClosureReason] = useState("");
+  const [savingReconciliation, setSavingReconciliation] = useState(false);
+  const [savingClosure, setSavingClosure] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dashboard", month],
@@ -236,6 +284,18 @@ export default function DashboardPage() {
       billDueEnabled: data.alertSettings.enabledTypes?.billDue !== false
     });
   }, [data?.alertSettings]);
+
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+    const fallbackActual = data.snapshot?.moneyInBank ?? 0;
+    const actual = data.reconciliation?.actualBalance ?? fallbackActual;
+    setReconciliationActual(String(actual));
+    setReconciliationNotes(data.reconciliation?.notes || "");
+    setClosureReason(data.monthClosure?.reason || "");
+    setReconciliationMessage(null);
+  }, [data]);
 
   const chartData = useMemo(() => {
     if (!data?.snapshot) {
@@ -283,6 +343,14 @@ export default function DashboardPage() {
       outgoingTotal
     };
   }, [data?.timeline]);
+
+  const ledgerSummary = useMemo(() => {
+    const entries = data?.ledgerEntries || [];
+    const planned = entries.filter((entry) => entry.status === "planned").length;
+    const posted = entries.filter((entry) => entry.status === "posted").length;
+    const paid = entries.filter((entry) => entry.status === "paid").length;
+    return { planned, posted, paid };
+  }, [data?.ledgerEntries]);
 
   async function saveAlertSettings() {
     const lowMoneyLeftThreshold = Number.parseFloat(settingsDraft.lowMoneyLeftThreshold);
@@ -344,9 +412,68 @@ export default function DashboardPage() {
       }
       await refetch();
     } catch (requestError) {
-      setSettingsMessage(requestError instanceof Error ? requestError.message : "Failed to save alert settings.");
+      setSettingsMessage(formatApiClientError(requestError, "Failed to save alert settings."));
     } finally {
       setSavingSettings(false);
+    }
+  }
+
+  async function saveReconciliation() {
+    const selectedMonth = month || data?.selectedMonth || "";
+    if (!selectedMonth) {
+      setReconciliationMessage("No month selected.");
+      return;
+    }
+
+    const actualBalance = Number.parseFloat(reconciliationActual);
+    if (!Number.isFinite(actualBalance)) {
+      setReconciliationMessage("Actual balance must be a valid number.");
+      return;
+    }
+
+    setSavingReconciliation(true);
+    setReconciliationMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/reconciliations/${selectedMonth}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          actualBalance,
+          notes: reconciliationNotes.trim() || undefined
+        })
+      });
+      setReconciliationMessage("Reconciliation saved.");
+      await refetch();
+    } catch (requestError) {
+      setReconciliationMessage(formatApiClientError(requestError, "Failed to save reconciliation."));
+    } finally {
+      setSavingReconciliation(false);
+    }
+  }
+
+  async function toggleMonthClosure() {
+    const selectedMonth = month || data?.selectedMonth || "";
+    if (!selectedMonth) {
+      setReconciliationMessage("No month selected.");
+      return;
+    }
+
+    const currentlyClosed = Boolean(data?.monthClosure?.closed);
+    setSavingClosure(true);
+    setReconciliationMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/month-closures/${selectedMonth}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          closed: !currentlyClosed,
+          reason: closureReason.trim() || undefined
+        })
+      });
+      setReconciliationMessage(currentlyClosed ? "Month reopened." : "Month closed.");
+      await refetch();
+    } catch (requestError) {
+      setReconciliationMessage(formatApiClientError(requestError, "Failed to update month lock."));
+    } finally {
+      setSavingClosure(false);
     }
   }
 
@@ -638,6 +765,134 @@ export default function DashboardPage() {
           ) : (
             <p className="mt-3 text-sm text-[var(--ink-soft)]">No active alerts for the current settings.</p>
           )}
+        </SectionPanel>
+
+        <SectionPanel
+          title="Reconciliation & Month Lock"
+          subtitle="Set actual balance, track variance, and lock reconciled months to prevent accidental edits."
+          right={
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                data?.monthClosure?.closed
+                  ? "border border-red-200 bg-red-50 text-red-800"
+                  : "border border-emerald-200 bg-emerald-50 text-emerald-800"
+              }`}
+            >
+              {data?.monthClosure?.closed ? "Closed month" : "Open month"}
+            </span>
+          }
+        >
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="panel p-3">
+              <p className="label">Selected month</p>
+              <p className="mt-1 text-sm font-medium text-[var(--ink-main)]">
+                {formatMonthKeyUK(month || data?.selectedMonth || "")}
+              </p>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <div>
+                  <p className="label">Opening balance</p>
+                  <p className="mt-1 text-sm text-[var(--ink-main)]">{formatGBP(data?.bankFlow?.openingBalance || 0)}</p>
+                </div>
+                <div>
+                  <p className="label">Planned to date</p>
+                  <p className="mt-1 text-sm text-[var(--ink-main)]">{formatGBP(data?.bankFlow?.plannedToDate || 0)}</p>
+                </div>
+                <div>
+                  <p className="label">Actual to date</p>
+                  <p className="mt-1 text-sm text-[var(--ink-main)]">{formatGBP(data?.bankFlow?.actualToDate || 0)}</p>
+                </div>
+                <div>
+                  <p className="label">Ledger status mix</p>
+                  <p className="mt-1 text-sm text-[var(--ink-main)]">
+                    Planned {ledgerSummary.planned} · Posted {ledgerSummary.posted} · Paid {ledgerSummary.paid}
+                  </p>
+                </div>
+              </div>
+
+              <p className="mt-2 text-xs text-[var(--ink-soft)]">
+                Money-in-bank uses {data?.bankFlow?.usingActual ? "actual posted/paid entries" : "planned events"} for this month.
+              </p>
+
+              <label className="mt-3 block">
+                <span className="label">Lock reason</span>
+                <input
+                  className="input mt-1"
+                  value={closureReason}
+                  onChange={(event) => setClosureReason(event.target.value)}
+                  placeholder="Optional reason for lock/reopen"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="button-secondary mt-3 w-full sm:w-auto"
+                onClick={() => toggleMonthClosure()}
+                disabled={savingClosure}
+              >
+                {savingClosure
+                  ? "Saving..."
+                  : data?.monthClosure?.closed
+                    ? "Reopen month"
+                    : "Close month"}
+              </button>
+            </div>
+
+            <div className="panel p-3">
+              <p className="label">Reconciliation</p>
+              <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                Expected: {formatGBP(data?.snapshot?.moneyInBank || 0)}
+              </p>
+
+              <label className="mt-3 block">
+                <span className="label">Actual balance</span>
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step="0.01"
+                  value={reconciliationActual}
+                  onChange={(event) => setReconciliationActual(event.target.value)}
+                />
+              </label>
+              <label className="mt-3 block">
+                <span className="label">Notes</span>
+                <textarea
+                  className="input mt-1 min-h-[96px]"
+                  value={reconciliationNotes}
+                  onChange={(event) => setReconciliationNotes(event.target.value)}
+                  placeholder="Optional reconciliation notes"
+                />
+              </label>
+
+              {data?.reconciliation ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${reconciliationStatusClass(
+                      data.reconciliation.status
+                    )}`}
+                  >
+                    {data.reconciliation.status}
+                  </span>
+                  <span className="text-sm text-[var(--ink-soft)]">
+                    Variance: {formatGBP(data.reconciliation.variance)}
+                  </span>
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                className="button-primary mt-3 w-full sm:w-auto"
+                onClick={() => saveReconciliation()}
+                disabled={savingReconciliation}
+              >
+                {savingReconciliation ? "Saving..." : "Save reconciliation"}
+              </button>
+            </div>
+          </div>
+
+          {reconciliationMessage ? (
+            <p className="mt-3 text-sm text-[var(--accent-strong)]">{reconciliationMessage}</p>
+          ) : null}
         </SectionPanel>
 
         <SectionPanel

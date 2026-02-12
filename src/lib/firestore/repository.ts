@@ -9,14 +9,18 @@ import {
   BankBalance,
   CardAccount,
   ImportRecord,
+  LedgerEntry,
   LineItem,
   LoanedOutItem,
+  MonthClosure,
   MonthlyAdjustment,
   MonthlyCardPayments,
   MonthlyIncomePaydays,
   MonthSnapshot,
   PushSubscriptionRecord,
   PurchasePlan,
+  ReconciliationRecord,
+  RecurrenceRule,
   UserProfile
 } from "@/types";
 
@@ -63,6 +67,23 @@ function normalizeDayList(input: unknown): number[] {
         .filter((value) => Number.isInteger(value) && value >= 1 && value <= 31)
     )
   ).sort((a, b) => a - b);
+}
+
+function normalizeLedgerStatus(value: unknown): LedgerEntry["status"] {
+  if (value === "posted") {
+    return "posted";
+  }
+  if (value === "paid") {
+    return "paid";
+  }
+  return "planned";
+}
+
+function normalizeReconciliationStatus(value: unknown): ReconciliationRecord["status"] {
+  if (value === "variance") {
+    return "variance";
+  }
+  return "matched";
 }
 
 export async function upsertUserProfile(profile: UserProfile): Promise<void> {
@@ -113,6 +134,22 @@ export async function listLineItems(
   }));
 }
 
+export async function listRecurrenceRules(uid: string): Promise<RecurrenceRule[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.recurrenceRules).orderBy("label", "asc").get();
+  return mapDocs<RecurrenceRule>(snap.docs).map((rule) => ({
+    ...rule,
+    intervalCount:
+      typeof rule.intervalCount === "number" && Number.isFinite(rule.intervalCount)
+        ? Math.max(1, Math.round(rule.intervalCount))
+        : 1,
+    active: rule.active !== false
+  }));
+}
+
+export async function replaceRecurrenceRules(uid: string, rules: RecurrenceRule[]): Promise<void> {
+  await replaceCollectionFromArray(uid, "recurrenceRules", rules, (rule) => rule.id);
+}
+
 export async function listPurchasePlans(uid: string): Promise<PurchasePlan[]> {
   const snap = await userDoc(uid).collection(COLLECTIONS.purchasePlans).orderBy("name", "asc").get();
   return mapDocs<PurchasePlan>(snap.docs);
@@ -148,6 +185,86 @@ export async function listMonthSnapshots(uid: string): Promise<MonthSnapshot[]> 
   return mapDocs<MonthSnapshot>(snap.docs);
 }
 
+export async function listLedgerEntries(uid: string, month?: string): Promise<LedgerEntry[]> {
+  const collection = userDoc(uid).collection(COLLECTIONS.ledgerEntries);
+  const snap = month
+    ? await collection.where("month", "==", month).get()
+    : await collection.get();
+
+  return mapDocs<LedgerEntry>(snap.docs)
+    .map((entry) => ({
+      ...entry,
+      status: normalizeLedgerStatus(entry.status)
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
+}
+
+export async function getLedgerEntry(uid: string, id: string): Promise<LedgerEntry | null> {
+  const doc = await userDoc(uid).collection(COLLECTIONS.ledgerEntries).doc(id).get();
+  if (!doc.exists) {
+    return null;
+  }
+
+  const data = doc.data() as Omit<LedgerEntry, "id">;
+  return {
+    id: doc.id,
+    ...data,
+    status: normalizeLedgerStatus(data.status)
+  };
+}
+
+export async function updateLedgerEntry(
+  uid: string,
+  id: string,
+  payload: Partial<Omit<LedgerEntry, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.ledgerEntries).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
+}
+
+export async function replaceLedgerEntriesForMonth(
+  uid: string,
+  month: string,
+  entries: Omit<LedgerEntry, "id">[]
+): Promise<void> {
+  const db = getFirebaseAdminFirestore();
+  const col = userDoc(uid).collection(COLLECTIONS.ledgerEntries);
+  const existingSnap = await col.where("month", "==", month).get();
+  const existingById = new Map(
+    existingSnap.docs.map((doc) => [doc.id, doc.data() as Omit<LedgerEntry, "id">])
+  );
+
+  const batch = db.batch();
+  const nextIds = new Set(entries.map((entry) => entry.sourceId));
+
+  existingSnap.docs.forEach((doc) => {
+    if (!nextIds.has(doc.id)) {
+      batch.delete(doc.ref);
+    }
+  });
+
+  entries.forEach((entry) => {
+    const docId = entry.sourceId;
+    const existing = existingById.get(docId);
+    const status = normalizeLedgerStatus(existing?.status ?? entry.status);
+    const postedAt =
+      status === "posted" || status === "paid" ? existing?.postedAt ?? entry.postedAt : undefined;
+    const paidAt = status === "paid" ? existing?.paidAt ?? entry.paidAt : undefined;
+    const payload: Omit<LedgerEntry, "id"> = {
+      ...entry,
+      status,
+      postedAt,
+      paidAt,
+      createdAt: existing?.createdAt ?? entry.createdAt,
+      updatedAt: entry.updatedAt
+    };
+    batch.set(col.doc(docId), stripUndefined(payload), { merge: true });
+  });
+
+  await batch.commit();
+}
+
 export async function listMonthlyAdjustments(uid: string): Promise<MonthlyAdjustment[]> {
   const snap = await userDoc(uid)
     .collection(COLLECTIONS.monthlyAdjustments)
@@ -172,6 +289,75 @@ export async function listLoanedOutItems(uid: string): Promise<LoanedOutItem[]> 
       paidBackMonth: item.paidBackMonth || undefined
     }))
     .sort((a, b) => a.startMonth.localeCompare(b.startMonth) || a.name.localeCompare(b.name));
+}
+
+export async function listMonthClosures(uid: string): Promise<MonthClosure[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.monthClosures).orderBy("month", "asc").get();
+  return mapDocs<MonthClosure>(snap.docs).map((entry) => ({
+    ...entry,
+    closed: Boolean(entry.closed)
+  }));
+}
+
+export async function getMonthClosure(uid: string, month: string): Promise<MonthClosure | null> {
+  const doc = await userDoc(uid).collection(COLLECTIONS.monthClosures).doc(month).get();
+  if (!doc.exists) {
+    return null;
+  }
+  const data = doc.data() as Omit<MonthClosure, "id">;
+  return {
+    id: doc.id,
+    ...data,
+    month: data.month || month,
+    closed: Boolean(data.closed)
+  };
+}
+
+export async function upsertMonthClosure(
+  uid: string,
+  month: string,
+  payload: Omit<MonthClosure, "id" | "month"> & Partial<Pick<MonthClosure, "month">>
+): Promise<void> {
+  await userDoc(uid)
+    .collection(COLLECTIONS.monthClosures)
+    .doc(month)
+    .set(stripUndefined({ ...payload, month }));
+}
+
+export async function listReconciliations(uid: string): Promise<ReconciliationRecord[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.reconciliations).orderBy("month", "asc").get();
+  return mapDocs<ReconciliationRecord>(snap.docs).map((entry) => ({
+    ...entry,
+    status: normalizeReconciliationStatus(entry.status)
+  }));
+}
+
+export async function getReconciliation(
+  uid: string,
+  month: string
+): Promise<ReconciliationRecord | null> {
+  const doc = await userDoc(uid).collection(COLLECTIONS.reconciliations).doc(month).get();
+  if (!doc.exists) {
+    return null;
+  }
+  const data = doc.data() as Omit<ReconciliationRecord, "id">;
+  return {
+    id: doc.id,
+    ...data,
+    month: data.month || month,
+    status: normalizeReconciliationStatus(data.status)
+  };
+}
+
+export async function upsertReconciliation(
+  uid: string,
+  month: string,
+  payload: Omit<ReconciliationRecord, "id" | "month"> & Partial<Pick<ReconciliationRecord, "month">>
+): Promise<void> {
+  await userDoc(uid)
+    .collection(COLLECTIONS.reconciliations)
+    .doc(month)
+    .set(stripUndefined({ ...payload, month }), { merge: true });
 }
 
 export async function createLoanedOutItem(
@@ -354,7 +540,7 @@ export async function saveImportRecord(uid: string, record: Omit<ImportRecord, "
   return id;
 }
 
-export async function replaceCollectionFromArray<T extends Record<string, unknown>>(
+export async function replaceCollectionFromArray<T extends object>(
   uid: string,
   collection: keyof typeof COLLECTIONS,
   items: T[],

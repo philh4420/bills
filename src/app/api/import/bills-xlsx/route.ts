@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
+import { assertNoClosedMonths, parseLockedMonthFromError } from "@/lib/firestore/month-lock";
 import { commitWorkbookImport } from "@/lib/firestore/import-commit";
 import { parseBillsWorkbook } from "@/lib/import/parse-bills-workbook";
 import { jsonError, jsonOk } from "@/lib/util/http";
@@ -34,6 +35,19 @@ export async function POST(request: NextRequest) {
           summary: parsed.summary,
           warnings: parsed.summary.warnings
         });
+      }
+
+      try {
+        await assertNoClosedMonths(uid);
+      } catch (error) {
+        const lockedMonth = parseLockedMonthFromError(error);
+        if (lockedMonth) {
+          return jsonError(423, `Month ${lockedMonth} is closed. Reopen it in reconciliation before importing.`, {
+            code: "MONTH_LOCKED",
+            month: lockedMonth
+          });
+        }
+        throw error;
       }
 
       const committed = await commitWorkbookImport({

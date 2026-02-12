@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 
 import { lineItemCreateSchema, lineItemPatchSchema } from "@/lib/api/schemas";
+import { assertNoClosedMonths, parseLockedMonthFromError } from "@/lib/firestore/month-lock";
 import { recomputeAndPersistSnapshots } from "@/lib/firestore/recompute";
 import {
   createLineItem,
@@ -13,6 +14,17 @@ import { jsonError, jsonOk } from "@/lib/util/http";
 import { formatZodError } from "@/lib/util/zod";
 
 export type LineItemCollection = "houseBills" | "incomeItems" | "shoppingItems" | "myBills";
+
+function monthLockedResponse(lockedMonth: string) {
+  return jsonError(
+    423,
+    `Month ${lockedMonth} is closed. Reopen it in reconciliation before editing.`,
+    {
+      code: "MONTH_LOCKED",
+      month: lockedMonth
+    }
+  );
+}
 
 export async function listLineItemsHandler(uid: string, collection: LineItemCollection) {
   const items = await listLineItems(uid, collection);
@@ -32,6 +44,16 @@ export async function createLineItemHandler(
 
   const now = toIsoNow();
   const defaultDueDay = 1;
+  try {
+    await assertNoClosedMonths(uid);
+  } catch (error) {
+    const lockedMonth = parseLockedMonthFromError(error);
+    if (lockedMonth) {
+      return monthLockedResponse(lockedMonth);
+    }
+    throw error;
+  }
+
   const id = await createLineItem(uid, collection, {
     name: parsed.data.name,
     amount: parsed.data.amount,
@@ -59,6 +81,16 @@ export async function patchLineItemHandler(
     return jsonError(400, "Invalid payload", formatZodError(parsed.error));
   }
 
+  try {
+    await assertNoClosedMonths(uid);
+  } catch (error) {
+    const lockedMonth = parseLockedMonthFromError(error);
+    if (lockedMonth) {
+      return monthLockedResponse(lockedMonth);
+    }
+    throw error;
+  }
+
   await updateLineItem(uid, collection, id, {
     ...parsed.data,
     updatedAt: toIsoNow()
@@ -70,6 +102,16 @@ export async function patchLineItemHandler(
 }
 
 export async function deleteLineItemHandler(uid: string, collection: LineItemCollection, id: string) {
+  try {
+    await assertNoClosedMonths(uid);
+  } catch (error) {
+    const lockedMonth = parseLockedMonthFromError(error);
+    if (lockedMonth) {
+      return monthLockedResponse(lockedMonth);
+    }
+    throw error;
+  }
+
   await deleteLineItem(uid, collection, id);
   await recomputeAndPersistSnapshots(uid);
   return jsonOk({ ok: true });

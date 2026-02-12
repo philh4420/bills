@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
 import { monthKeySchema, monthlyIncomePaydaysPutSchema } from "@/lib/api/schemas";
+import { assertMonthEditable, parseLockedMonthFromError } from "@/lib/firestore/month-lock";
 import { recomputeAndPersistSnapshots } from "@/lib/firestore/recompute";
 import { listLineItems, listMonthlyIncomePaydays, upsertMonthlyIncomePaydays } from "@/lib/firestore/repository";
 import { toIsoNow } from "@/lib/util/dates";
@@ -45,6 +46,19 @@ export async function PUT(
     });
 
     const now = toIsoNow();
+    try {
+      await assertMonthEditable(uid, month);
+    } catch (error) {
+      const lockedMonth = parseLockedMonthFromError(error);
+      if (lockedMonth) {
+        return jsonError(423, `Month ${lockedMonth} is closed. Reopen it in reconciliation before editing.`, {
+          code: "MONTH_LOCKED",
+          month: lockedMonth
+        });
+      }
+      throw error;
+    }
+
     await upsertMonthlyIncomePaydays(uid, month, {
       byIncomeId,
       createdAt: existingEntry?.createdAt ?? now,

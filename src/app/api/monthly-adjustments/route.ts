@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
 import { monthlyAdjustmentCreateSchema } from "@/lib/api/schemas";
+import { assertMonthRangeEditableWithFuture, parseLockedMonthFromError } from "@/lib/firestore/month-lock";
 import { recomputeAndPersistSnapshots } from "@/lib/firestore/recompute";
 import {
   createMonthlyAdjustment,
@@ -29,6 +30,19 @@ export async function POST(request: NextRequest) {
 
     if (parsed.data.endMonth && parsed.data.endMonth < parsed.data.startMonth) {
       return jsonError(400, "endMonth must be greater than or equal to startMonth");
+    }
+
+    try {
+      await assertMonthRangeEditableWithFuture(uid, parsed.data.startMonth, parsed.data.endMonth);
+    } catch (error) {
+      const lockedMonth = parseLockedMonthFromError(error);
+      if (lockedMonth) {
+        return jsonError(423, `Month ${lockedMonth} is closed. Reopen it in reconciliation before editing.`, {
+          code: "MONTH_LOCKED",
+          month: lockedMonth
+        });
+      }
+      throw error;
     }
 
     const now = toIsoNow();

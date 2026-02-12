@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { MobileEditDrawer } from "@/components/mobile-edit-drawer";
 import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
-import { authedRequest } from "@/lib/api/client";
+import { authedRequest, formatApiClientError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
 import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
@@ -204,20 +204,24 @@ function LineItemCollection({
     }
 
     setMessage(null);
-    const dueDay = supportsDueDay ? parseDueDayInput(newDueDay) : null;
-    await authedRequest(getIdToken, endpoint, {
-      method: "POST",
-      body: JSON.stringify({
-        name: newName.trim(),
-        amount: Number(newAmount),
-        dueDayOfMonth: supportsDueDay ? dueDay : undefined
-      })
-    });
-    setNewName("");
-    setNewAmount("0");
-    setNewDueDay("1");
-    setMessage("Created item");
-    await query.refetch();
+    try {
+      const dueDay = supportsDueDay ? parseDueDayInput(newDueDay) : null;
+      await authedRequest(getIdToken, endpoint, {
+        method: "POST",
+        body: JSON.stringify({
+          name: newName.trim(),
+          amount: Number(newAmount),
+          dueDayOfMonth: supportsDueDay ? dueDay : undefined
+        })
+      });
+      setNewName("");
+      setNewAmount("0");
+      setNewDueDay("1");
+      setMessage("Created item");
+      await query.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to create item"));
+    }
   }
 
   async function saveItem(id: string) {
@@ -227,25 +231,33 @@ function LineItemCollection({
     }
 
     setMessage(null);
-    await authedRequest(getIdToken, `${endpoint}/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        name: item.name,
-        amount: item.amount,
-        dueDayOfMonth: supportsDueDay ? (item.dueDayOfMonth ?? null) : undefined
-      })
-    });
-    setMessage("Saved item");
-    await query.refetch();
+    try {
+      await authedRequest(getIdToken, `${endpoint}/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: item.name,
+          amount: item.amount,
+          dueDayOfMonth: supportsDueDay ? (item.dueDayOfMonth ?? null) : undefined
+        })
+      });
+      setMessage("Saved item");
+      await query.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to save item"));
+    }
   }
 
   async function deleteItem(id: string) {
     setMessage(null);
-    await authedRequest(getIdToken, `${endpoint}/${id}`, {
-      method: "DELETE"
-    });
-    setMessage("Deleted item");
-    await query.refetch();
+    try {
+      await authedRequest(getIdToken, `${endpoint}/${id}`, {
+        method: "DELETE"
+      });
+      setMessage("Deleted item");
+      await query.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to delete item"));
+    }
   }
 
   return (
@@ -656,7 +668,7 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
       setMessage(`Saved income paydays for ${formatMonthKeyUK(selectedMonth)}`);
       await query.refetch();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save income paydays");
+      setMessage(formatApiClientError(error, "Failed to save income paydays"));
     }
   }
 
@@ -874,7 +886,7 @@ function ExtraIncomeCollection({ getIdToken }: { getIdToken: () => Promise<strin
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create extra income");
+      setMessage(formatApiClientError(error, "Failed to create extra income"));
       return false;
     }
   }
@@ -920,7 +932,7 @@ function ExtraIncomeCollection({ getIdToken }: { getIdToken: () => Promise<strin
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save extra income");
+      setMessage(formatApiClientError(error, "Failed to save extra income"));
       return false;
     }
   }
@@ -935,7 +947,7 @@ function ExtraIncomeCollection({ getIdToken }: { getIdToken: () => Promise<strin
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete extra income");
+      setMessage(formatApiClientError(error, "Failed to delete extra income"));
       return false;
     }
   }
@@ -1401,7 +1413,7 @@ function BankBalanceSection({ getIdToken }: { getIdToken: () => Promise<string |
       setMessage("Saved bank balance");
       await query.refetch();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save bank balance");
+      setMessage(formatApiClientError(error, "Failed to save bank balance"));
     }
   }
 
@@ -1562,7 +1574,7 @@ function LoanedOutCollection({ getIdToken }: { getIdToken: () => Promise<string 
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create loaned-out entry");
+      setMessage(formatApiClientError(error, "Failed to create loaned-out entry"));
       return false;
     }
   }
@@ -1608,7 +1620,7 @@ function LoanedOutCollection({ getIdToken }: { getIdToken: () => Promise<string 
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save loaned-out entry");
+      setMessage(formatApiClientError(error, "Failed to save loaned-out entry"));
       return false;
     }
   }
@@ -1623,7 +1635,7 @@ function LoanedOutCollection({ getIdToken }: { getIdToken: () => Promise<string 
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete loaned-out entry");
+      setMessage(formatApiClientError(error, "Failed to delete loaned-out entry"));
       return false;
     }
   }
@@ -2160,7 +2172,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create adjustment");
+      setMessage(formatApiClientError(error, "Failed to create adjustment"));
       return false;
     }
   }
@@ -2200,7 +2212,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save adjustment");
+      setMessage(formatApiClientError(error, "Failed to save adjustment"));
       return false;
     }
   }
@@ -2215,7 +2227,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       await query.refetch();
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete adjustment");
+      setMessage(formatApiClientError(error, "Failed to delete adjustment"));
       return false;
     }
   }

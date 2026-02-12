@@ -1,4 +1,5 @@
-import { computeMonthSnapshots } from "@/lib/formulas/engine";
+import { buildMonthTimeline } from "@/lib/dashboard/timeline";
+import { extendMonthlyPaymentsToYearEnd, computeMonthSnapshots } from "@/lib/formulas/engine";
 import {
   getBankBalance,
   listCardAccounts,
@@ -7,9 +8,13 @@ import {
   listMonthlyIncomePaydays,
   listLineItems,
   listMonthlyPayments,
+  replaceLedgerEntriesForMonth,
   replaceMonthSnapshots
 } from "@/lib/firestore/repository";
+import { buildPlannedLedgerEntriesForMonth } from "@/lib/ledger/engine";
 import { dispatchSmartAlertsForUser } from "@/lib/notifications/smart-alerts";
+import { syncDefaultRecurrenceRules } from "@/lib/recurrence/sync";
+import { monthKeyInTimeZone } from "@/lib/util/dates";
 
 export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
   const [
@@ -37,9 +42,10 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
       getBankBalance(uid)
     ]);
 
+  const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
   const snapshots = computeMonthSnapshots({
     cards,
-    monthlyPayments,
+    monthlyPayments: timelinePayments,
     houseBills,
     income,
     shopping,
@@ -51,6 +57,46 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
   });
 
   await replaceMonthSnapshots(uid, snapshots);
+
+  const paydaysByMonth = new Map(
+    incomePaydays.map((entry) => [entry.month, entry.byIncomeId] as const)
+  );
+  const nowIso = new Date().toISOString();
+
+  await Promise.all(
+    timelinePayments.map(async (payment) => {
+      const timeline = buildMonthTimeline({
+        selectedMonth: payment.month,
+        cards,
+        monthlyPayments: payment,
+        income,
+        incomePaydayOverridesByIncomeId: paydaysByMonth.get(payment.month) || {},
+        houseBills,
+        shopping,
+        myBills,
+        adjustments,
+        loanedOutItems
+      });
+
+      const plannedEntries = buildPlannedLedgerEntriesForMonth({
+        month: payment.month,
+        events: timeline.events,
+        nowIso
+      });
+
+      await replaceLedgerEntriesForMonth(uid, payment.month, plannedEntries);
+    })
+  );
+
+  await syncDefaultRecurrenceRules(uid, {
+    cards,
+    houseBills,
+    income,
+    shopping,
+    myBills,
+    adjustments,
+    startMonth: timelinePayments[0]?.month || snapshots[0]?.month || monthKeyInTimeZone()
+  });
 
   try {
     await dispatchSmartAlertsForUser(uid, { source: "realtime", now: new Date() });

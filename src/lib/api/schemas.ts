@@ -164,3 +164,17 @@ export const loanedOutPatchSchema = z
 export const bankBalancePutSchema = z.object({
   amount: z.number()
 });
+
+export const monthClosurePutSchema = z.object({
+  closed: z.boolean(),
+  reason: z.string().trim().max(200).optional()
+});
+
+export const reconciliationPutSchema = z.object({
+  actualBalance: z.number(),
+  notes: z.string().trim().max(1000).optional()
+});
+
+export const ledgerEntryPatchSchema = z.object({
+  status: z.enum(["planned", "posted", "paid"])
+});

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
 import { bankBalancePutSchema } from "@/lib/api/schemas";
+import { assertNoClosedMonths, parseLockedMonthFromError } from "@/lib/firestore/month-lock";
 import { recomputeAndPersistSnapshots } from "@/lib/firestore/recompute";
 import { getBankBalance, upsertBankBalance } from "@/lib/firestore/repository";
 import { toIsoNow } from "@/lib/util/dates";
@@ -26,6 +27,19 @@ export async function PUT(request: NextRequest) {
 
     const existing = await getBankBalance(uid);
     const now = toIsoNow();
+
+    try {
+      await assertNoClosedMonths(uid);
+    } catch (error) {
+      const lockedMonth = parseLockedMonthFromError(error);
+      if (lockedMonth) {
+        return jsonError(423, `Month ${lockedMonth} is closed. Reopen it in reconciliation before editing.`, {
+          code: "MONTH_LOCKED",
+          month: lockedMonth
+        });
+      }
+      throw error;
+    }
 
     await upsertBankBalance(
       uid,

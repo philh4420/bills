@@ -29,6 +29,7 @@ Open [http://localhost:3000](http://localhost:3000).
 - `/login`
 - `/import`
 - `/dashboard`
+- `/reconciliation`
 - `/cards`
 - `/bills`
 - `/purchases`
@@ -75,6 +76,10 @@ npx web-push generate-vapid-keys
 
 - `POST /api/import/bills-xlsx`
 - `GET /api/dashboard?month=YYYY-MM`
+- `GET /api/ledger?month=YYYY-MM`, `PATCH /api/ledger/:id`
+- `GET /api/month-closures?month=YYYY-MM`, `GET|PUT /api/month-closures/:month`
+- `GET /api/reconciliations?month=YYYY-MM`, `GET|PUT /api/reconciliations/:month`
+- `GET /api/recurrence-rules`
 - `GET|PUT /api/alerts/settings`
 - `GET /api/cards`
 - `PATCH /api/cards/:cardId`

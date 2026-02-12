@@ -9,6 +9,87 @@ export class ApiClientError extends Error {
   }
 }
 
+function detailMessageFromUnknown(details: unknown): string | null {
+  if (!details) {
+    return null;
+  }
+
+  if (typeof details === "string") {
+    return details;
+  }
+
+  if (typeof details !== "object") {
+    return null;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  if (typeof detailsRecord.message === "string" && detailsRecord.message) {
+    return detailsRecord.message;
+  }
+
+  for (const value of Object.values(detailsRecord)) {
+    if (typeof value === "string" && value) {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const firstString = value.find((entry) => typeof entry === "string" && entry.length > 0);
+      if (typeof firstString === "string") {
+        return firstString;
+      }
+    }
+  }
+
+  return null;
+}
+
+function lockedMonthFromError(error: ApiClientError): string | null {
+  if (!error.details || typeof error.details !== "object") {
+    return null;
+  }
+
+  const maybeMonth = (error.details as Record<string, unknown>).month;
+  if (typeof maybeMonth === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(maybeMonth)) {
+    return maybeMonth;
+  }
+
+  const messageMonth = error.message.match(/\b\d{4}-(0[1-9]|1[0-2])\b/);
+  return messageMonth?.[0] ?? null;
+}
+
+export function formatApiClientError(error: unknown, fallback: string): string {
+  if (error instanceof ApiClientError) {
+    if (error.status === 401) {
+      return "Your session has expired. Sign in again.";
+    }
+
+    if (error.status === 403) {
+      return "Access denied. This app is private to the owner account.";
+    }
+
+    if (error.status === 423) {
+      const lockedMonth = lockedMonthFromError(error);
+      if (lockedMonth) {
+        return `Month ${lockedMonth} is locked. Reopen it from the Reconciliation page to continue.`;
+      }
+      return error.message || fallback;
+    }
+
+    if (error.status === 400) {
+      const detailsMessage = detailMessageFromUnknown(error.details);
+      return detailsMessage || error.message || fallback;
+    }
+
+    return error.message || fallback;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 export async function authedRequest<T>(
   getIdToken: () => Promise<string | null>,
   path: string,

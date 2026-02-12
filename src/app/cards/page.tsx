@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MobileEditDrawer } from "@/components/mobile-edit-drawer";
 import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
-import { authedRequest } from "@/lib/api/client";
+import { authedRequest, formatApiClientError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
 import { computeUpcomingDueDate, formatDueDateLabel } from "@/lib/cards/due-date";
 import { computeCardMonthProjections } from "@/lib/formulas/engine";
@@ -356,14 +356,18 @@ export default function CardsPage() {
       return;
     }
 
-    await authedRequest(getIdToken, `/api/cards/${cardId}`, {
-      method: "PATCH",
-      body: JSON.stringify(draft)
-    });
+    try {
+      await authedRequest(getIdToken, `/api/cards/${cardId}`, {
+        method: "PATCH",
+        body: JSON.stringify(draft)
+      });
 
-    const cardName = cardsQuery.data?.cards.find((entry) => entry.id === cardId)?.name || cardId;
-    setMessage(`Saved ${cardName}`);
-    await Promise.all([cardsQuery.refetch(), paymentsQuery.refetch()]);
+      const cardName = cardsQuery.data?.cards.find((entry) => entry.id === cardId)?.name || cardId;
+      setMessage(`Saved ${cardName}`);
+      await Promise.all([cardsQuery.refetch(), paymentsQuery.refetch()]);
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to save card"));
+    }
   }
 
   async function saveMonthly() {
@@ -372,18 +376,22 @@ export default function CardsPage() {
     }
 
     setMessage(null);
-    await authedRequest(getIdToken, `/api/monthly-payments/${month}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        byCardId: paymentDraft,
-        formulaVariantId,
-        formulaExpression: null,
-        inferred: activePayment?.inferred ?? false
-      })
-    });
+    try {
+      await authedRequest(getIdToken, `/api/monthly-payments/${month}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          byCardId: paymentDraft,
+          formulaVariantId,
+          formulaExpression: null,
+          inferred: activePayment?.inferred ?? false
+        })
+      });
 
-    setMessage(`Saved monthly payments for ${selectedMonthLabel}`);
-    await paymentsQuery.refetch();
+      setMessage(`Saved monthly payments for ${selectedMonthLabel}`);
+      await paymentsQuery.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to save monthly payments"));
+    }
   }
 
   async function enablePushReminders() {
@@ -476,7 +484,7 @@ export default function CardsPage() {
       await refreshPushStateFromDeviceAndServer();
     } catch (error) {
       setPushSubscribed(false);
-      setPushMessage(error instanceof Error ? error.message : "Failed to enable push reminders.");
+      setPushMessage(formatApiClientError(error, "Failed to enable push reminders."));
     } finally {
       setPushBusy(false);
     }
@@ -506,7 +514,7 @@ export default function CardsPage() {
       setPushMessage("Push reminders disabled.");
       await refreshPushStateFromDeviceAndServer();
     } catch (error) {
-      setPushMessage(error instanceof Error ? error.message : "Failed to disable push reminders.");
+      setPushMessage(formatApiClientError(error, "Failed to disable push reminders."));
     } finally {
       setPushBusy(false);
     }
@@ -562,7 +570,7 @@ export default function CardsPage() {
 
       setPushMessage("No active push subscription found for this account.");
     } catch (error) {
-      setPushMessage(error instanceof Error ? error.message : "Failed to send test notification.");
+      setPushMessage(formatApiClientError(error, "Failed to send test notification."));
     } finally {
       setPushBusy(false);
     }
@@ -595,7 +603,7 @@ export default function CardsPage() {
       });
       setPushMessage("Local notification triggered.");
     } catch (error) {
-      setPushMessage(error instanceof Error ? error.message : "Failed to trigger local notification.");
+      setPushMessage(formatApiClientError(error, "Failed to trigger local notification."));
     } finally {
       setPushBusy(false);
     }
@@ -624,7 +632,7 @@ export default function CardsPage() {
         setPushMessage("Smart alert check completed with no sends.");
       }
     } catch (error) {
-      setPushMessage(error instanceof Error ? error.message : "Smart alert check failed.");
+      setPushMessage(formatApiClientError(error, "Smart alert check failed."));
     } finally {
       setPushBusy(false);
     }

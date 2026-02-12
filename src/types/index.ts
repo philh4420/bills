@@ -58,6 +58,55 @@ export interface LineItem {
   updatedAt: string;
 }
 
+export type RecurrenceFrequency = "monthly" | "weekly" | "every4Weeks" | "customInterval";
+export type RecurrenceKind = "income" | "expense" | "card";
+export type RecurrenceSourceType =
+  | "cardAccount"
+  | "houseBill"
+  | "incomeItem"
+  | "shoppingItem"
+  | "myBill"
+  | "monthlyAdjustment";
+
+export interface RecurrenceRule {
+  id: string;
+  sourceType: RecurrenceSourceType;
+  sourceId: string;
+  label: string;
+  kind: RecurrenceKind;
+  frequency: RecurrenceFrequency;
+  intervalCount: number;
+  dayOfMonth?: number | null;
+  weekday?: number | null; // 0 (Sun) -> 6 (Sat)
+  startMonth: MonthKey;
+  endMonth?: MonthKey;
+  amount: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LedgerEntryStatus = "planned" | "posted" | "paid";
+export type LedgerEntrySourceType = "card-due" | "bill-due" | "adjustment" | "income" | "loaned-out";
+
+export interface LedgerEntry {
+  id: string;
+  month: MonthKey;
+  date: string; // YYYY-MM-DD
+  day: number;
+  title: string;
+  subtitle?: string;
+  category: string;
+  amount: number; // debit negative, credit positive
+  status: LedgerEntryStatus;
+  sourceType: LedgerEntrySourceType;
+  sourceId: string;
+  createdAt: string;
+  updatedAt: string;
+  postedAt?: string;
+  paidAt?: string;
+}
+
 export type AdjustmentCategory = "income" | "houseBills" | "shopping" | "myBills";
 export type IncomeSourceType = "loan" | "bonus" | "other";
 
@@ -127,6 +176,32 @@ export interface MonthSnapshot {
   updatedAt: string;
 }
 
+export interface MonthClosure {
+  id: string;
+  month: MonthKey;
+  closed: boolean;
+  reason?: string;
+  closedAt?: string;
+  closedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ReconciliationStatus = "matched" | "variance";
+
+export interface ReconciliationRecord {
+  id: string;
+  month: MonthKey;
+  expectedBalance: number;
+  actualBalance: number;
+  variance: number;
+  status: ReconciliationStatus;
+  notes?: string;
+  reconciledAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ImportRecord {
   id: string;
   fileName: string;
@@ -177,6 +252,15 @@ export interface DashboardResponse {
   monthlyPayments: MonthlyCardPayments | null;
   bankBalance: BankBalance | null;
   loanedOutItems: LoanedOutItem[];
+  ledgerEntries: LedgerEntry[];
+  monthClosure: MonthClosure | null;
+  reconciliation: ReconciliationRecord | null;
+  bankFlow: {
+    openingBalance: number;
+    plannedToDate: number;
+    actualToDate: number;
+    usingActual: boolean;
+  };
   alertSettings: AlertSettings;
   alerts: SmartAlert[];
   timeline: MonthTimeline;

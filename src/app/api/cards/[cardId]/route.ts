@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { cardPatchSchema } from "@/lib/api/schemas";
 import { withOwnerAuth } from "@/lib/api/handler";
+import { assertNoClosedMonths, parseLockedMonthFromError } from "@/lib/firestore/month-lock";
 import { recomputeAndPersistSnapshots } from "@/lib/firestore/recompute";
 import { listCardAccounts, upsertCardAccount } from "@/lib/firestore/repository";
 import { toIsoNow } from "@/lib/util/dates";
@@ -27,6 +28,19 @@ export async function PATCH(
     }
 
     const now = toIsoNow();
+
+    try {
+      await assertNoClosedMonths(uid);
+    } catch (error) {
+      const lockedMonth = parseLockedMonthFromError(error);
+      if (lockedMonth) {
+        return jsonError(423, `Month ${lockedMonth} is closed. Reopen it in reconciliation before editing.`, {
+          code: "MONTH_LOCKED",
+          month: lockedMonth
+        });
+      }
+      throw error;
+    }
 
     await upsertCardAccount(uid, cardId, {
       name: existing.name,

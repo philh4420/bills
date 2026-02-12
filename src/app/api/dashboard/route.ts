@@ -10,15 +10,19 @@ import {
 import { daysInMonth, getDatePartsInTimeZone } from "@/lib/cards/due-date";
 import { buildMonthTimeline } from "@/lib/dashboard/timeline";
 import { computeCardMonthProjections, computeMonthSnapshots, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
+import { sumLedgerMovement } from "@/lib/ledger/engine";
 import {
   getAlertSettings,
   getBankBalance,
   listCardAccounts,
+  listLedgerEntries,
   listLoanedOutItems,
   listLineItems,
+  listMonthClosures,
   listMonthlyAdjustments,
   listMonthlyIncomePaydays,
-  listMonthlyPayments
+  listMonthlyPayments,
+  listReconciliations
 } from "@/lib/firestore/repository";
 import { monthKeySchema } from "@/lib/api/schemas";
 import { APP_TIMEZONE } from "@/lib/util/constants";
@@ -46,7 +50,9 @@ export async function GET(request: NextRequest) {
       monthlyIncomePaydays,
       loanedOutItems,
       bankBalance,
-      persistedAlertSettings
+      persistedAlertSettings,
+      monthClosures,
+      reconciliations
     ] = await Promise.all([
       listCardAccounts(uid),
       listMonthlyPayments(uid),
@@ -58,7 +64,9 @@ export async function GET(request: NextRequest) {
       listMonthlyIncomePaydays(uid),
       listLoanedOutItems(uid),
       getBankBalance(uid),
-      getAlertSettings(uid)
+      getAlertSettings(uid),
+      listMonthClosures(uid),
+      listReconciliations(uid)
     ]);
 
     const reminderOffsets = parseReminderOffsets(process.env.CARD_REMINDER_OFFSETS);
@@ -121,6 +129,7 @@ export async function GET(request: NextRequest) {
       adjustments,
       loanedOutItems
     });
+    const ledgerEntries = await listLedgerEntries(uid, selectedMonth);
 
     const selectedIndex = snapshots.findIndex((entry) => entry.month === selectedMonth);
     const openingBankBalance =
@@ -133,12 +142,20 @@ export async function GET(request: NextRequest) {
         ? daysInMonth(selectedYear, selectedMonthNumber)
         : 31;
     const dayCutoff = selectedMonth === currentMonth ? todayParts.day : monthDays;
-    const cashflowMovementToCutoff = normalizeCurrency(
+    const plannedMovementToCutoff = normalizeCurrency(
       timeline.events
         .filter((event) => event.day <= dayCutoff)
         .reduce((acc, event) => acc + event.amount, 0)
     );
-    const moneyInBankByDueDates = normalizeCurrency(openingBankBalance + cashflowMovementToCutoff);
+    const actualMovementToCutoff = sumLedgerMovement(ledgerEntries, {
+      cutoffDay: dayCutoff,
+      statuses: ["posted", "paid"]
+    });
+    const hasActualStatuses = ledgerEntries.some((entry) => entry.status === "posted" || entry.status === "paid");
+    const activeMovement = hasActualStatuses ? actualMovementToCutoff : plannedMovementToCutoff;
+    const moneyInBankByDueDates = normalizeCurrency(openingBankBalance + activeMovement);
+    const monthClosure = monthClosures.find((entry) => entry.month === selectedMonth) || null;
+    const reconciliation = reconciliations.find((entry) => entry.month === selectedMonth) || null;
 
     const normalizedSnapshot = selectedSnapshot
       ? {
@@ -172,6 +189,15 @@ export async function GET(request: NextRequest) {
       monthlyPayments: selectedMonthlyPayment,
       bankBalance,
       loanedOutItems,
+      ledgerEntries,
+      monthClosure,
+      reconciliation,
+      bankFlow: {
+        openingBalance: openingBankBalance,
+        plannedToDate: plannedMovementToCutoff,
+        actualToDate: actualMovementToCutoff,
+        usingActual: hasActualStatuses
+      },
       alertSettings,
       alerts,
       timeline
