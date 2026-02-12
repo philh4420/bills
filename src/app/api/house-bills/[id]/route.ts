@@ -7,9 +7,9 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  return withOwnerAuth(request, async ({ uid }) => {
+  return withOwnerAuth(request, async ({ uid, command }) => {
     const { id } = await context.params;
-    return patchLineItemHandler(request, uid, "houseBills", id);
+    return patchLineItemHandler(request, uid, "houseBills", id, command);
   });
 }
 
@@ -17,8 +17,8 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  return withOwnerAuth(request, async ({ uid }) => {
+  return withOwnerAuth(request, async ({ uid, command }) => {
     const { id } = await context.params;
-    return deleteLineItemHandler(uid, "houseBills", id);
+    return deleteLineItemHandler(uid, "houseBills", id, command);
   });
 }

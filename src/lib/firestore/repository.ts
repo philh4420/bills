@@ -7,8 +7,11 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import {
   AlertSettings,
   AlertStateRecord,
+  BackupRecord,
+  AuditEventRecord,
   BankBalance,
   CardAccount,
+  CommandRecord,
   ImportRecord,
   LedgerEntry,
   LineItem,
@@ -184,6 +187,58 @@ export async function replaceRecurrenceRules(uid: string, rules: RecurrenceRule[
 export async function listPurchasePlans(uid: string): Promise<PurchasePlan[]> {
   const snap = await userDoc(uid).collection(COLLECTIONS.purchasePlans).orderBy("name", "asc").get();
   return mapDocs<PurchasePlan>(snap.docs);
+}
+
+export async function listBackups(uid: string): Promise<BackupRecord[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.backups).orderBy("createdAt", "desc").limit(25).get();
+  return mapDocs<BackupRecord>(snap.docs);
+}
+
+export async function createBackupRecord(uid: string, payload: Omit<BackupRecord, "id">): Promise<string> {
+  const id = randomUUID();
+  await userDoc(uid).collection(COLLECTIONS.backups).doc(id).set(stripUndefined(payload));
+  return id;
+}
+
+export async function createCommandRecord(
+  uid: string,
+  payload: Omit<CommandRecord, "id">
+): Promise<string> {
+  const id = randomUUID();
+  await userDoc(uid).collection(COLLECTIONS.commands).doc(id).set(stripUndefined(payload));
+  return id;
+}
+
+export async function getCommandRecord(uid: string, id: string): Promise<CommandRecord | null> {
+  const doc = await userDoc(uid).collection(COLLECTIONS.commands).doc(id).get();
+  if (!doc.exists) {
+    return null;
+  }
+  return { id: doc.id, ...(doc.data() as Omit<CommandRecord, "id">) };
+}
+
+export async function updateCommandRecord(
+  uid: string,
+  id: string,
+  payload: Partial<Omit<CommandRecord, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.commands).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
+}
+
+export async function createAuditEventRecord(
+  uid: string,
+  payload: Omit<AuditEventRecord, "id">
+): Promise<string> {
+  const id = randomUUID();
+  await userDoc(uid).collection(COLLECTIONS.auditEvents).doc(id).set(stripUndefined(payload));
+  return id;
+}
+
+export async function listAuditEventRecords(uid: string): Promise<AuditEventRecord[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.auditEvents).orderBy("createdAt", "desc").get();
+  return mapDocs<AuditEventRecord>(snap.docs);
 }
 
 function toPushSubscriptionId(endpoint: string): string {

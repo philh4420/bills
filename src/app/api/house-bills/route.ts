@@ -8,5 +8,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  return withOwnerAuth(request, async ({ uid }) => createLineItemHandler(request, uid, "houseBills"));
+  return withOwnerAuth(request, async ({ uid, command }) =>
+    createLineItemHandler(request, uid, "houseBills", command)
+  );
 }

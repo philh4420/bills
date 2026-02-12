@@ -18,7 +18,11 @@ export const COLLECTIONS = {
   imports: "imports",
   pushSubscriptions: "pushSubscriptions",
   alertSettings: "alertSettings",
-  alertStates: "alertStates"
+  alertStates: "alertStates",
+  backups: "backups",
+  commands: "commands",
+  auditEvents: "auditEvents",
+  auditEventsArchive: "auditEventsArchive"
 } as const;
 
 export type CollectionKey = keyof typeof COLLECTIONS;

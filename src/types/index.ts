@@ -233,6 +233,64 @@ export interface ReconciliationRecord {
   updatedAt: string;
 }
 
+export type BackupAction = "export" | "restore";
+export type BackupStatus = "success" | "failed";
+export type BackupFormat = "json" | "csv" | "snapshot";
+export type BackupMode = "dry-run" | "commit";
+
+export interface BackupRecord {
+  id: string;
+  action: BackupAction;
+  status: BackupStatus;
+  format: BackupFormat;
+  mode: BackupMode;
+  createdAt: string;
+  totalDocuments: number;
+  collectionCounts: Record<string, number>;
+  message?: string;
+}
+
+export type CommandStatus = "running" | "succeeded" | "failed" | "undone";
+
+export interface CommandRecord {
+  id: string;
+  method: string;
+  path: string;
+  actorEmail: string;
+  status: CommandStatus;
+  reversible: boolean;
+  undoKind?: string;
+  undoPayload?: Record<string, unknown>;
+  requestPayload?: unknown;
+  responseStatus?: number;
+  errorMessage?: string;
+  entityType?: string;
+  entityId?: string;
+  month?: MonthKey;
+  createdAt: string;
+  updatedAt: string;
+  undoneAt?: string;
+}
+
+export interface AuditEventRecord {
+  id: string;
+  commandId?: string;
+  type: "write" | "undo" | "archive";
+  method: string;
+  path: string;
+  actorEmail: string;
+  success: boolean;
+  entityType?: string;
+  entityId?: string;
+  month?: MonthKey;
+  before?: unknown;
+  after?: unknown;
+  requestPayload?: unknown;
+  responseStatus?: number;
+  message?: string;
+  createdAt: string;
+}
+
 export interface ImportRecord {
   id: string;
   fileName: string;

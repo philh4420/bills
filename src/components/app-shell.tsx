@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth/client";
 const NAV = [
   { href: "/import", label: "Import" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/history", label: "History" },
   { href: "/reconciliation", label: "Reconcile" },
   { href: "/cards", label: "Cards" },
   { href: "/bills", label: "Bills" },
