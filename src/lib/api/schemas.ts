@@ -99,7 +99,20 @@ export const monthlyAdjustmentPatchSchema = z.object({
 
 export const alertSettingsPutSchema = z.object({
   lowMoneyLeftThreshold: z.number().nonnegative(),
-  utilizationThresholdPercent: z.number().min(0).max(1000)
+  utilizationThresholdPercent: z.number().min(0).max(1000),
+  dueReminderOffsets: z.array(z.number().int().min(0).max(31)).min(1).optional(),
+  deliveryHoursLocal: z.array(z.number().int().min(0).max(23)).min(1).optional(),
+  cooldownMinutes: z.number().int().min(0).max(1440).optional(),
+  realtimePushEnabled: z.boolean().optional(),
+  cronPushEnabled: z.boolean().optional(),
+  enabledTypes: z
+    .object({
+      lowMoneyLeft: z.boolean(),
+      cardUtilization: z.boolean(),
+      cardDue: z.boolean(),
+      billDue: z.boolean()
+    })
+    .optional()
 });
 
 export const loanedOutStatusSchema = z.enum(["outstanding", "paidBack"]);

@@ -186,11 +186,23 @@ export interface AlertSettings {
   lowMoneyLeftThreshold: number;
   utilizationThresholdPercent: number;
   dueReminderOffsets: number[];
+  deliveryHoursLocal: number[];
+  cooldownMinutes: number;
+  realtimePushEnabled: boolean;
+  cronPushEnabled: boolean;
+  enabledTypes: {
+    lowMoneyLeft: boolean;
+    cardUtilization: boolean;
+    cardDue: boolean;
+    billDue: boolean;
+  };
+  lastPushSentAt?: string;
+  lastPushFingerprint?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
-export type SmartAlertType = "low-money-left" | "card-utilization" | "card-due";
+export type SmartAlertType = "low-money-left" | "card-utilization" | "card-due" | "bill-due";
 export type SmartAlertSeverity = "info" | "warning" | "critical";
 
 export interface SmartAlert {

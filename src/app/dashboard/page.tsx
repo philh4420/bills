@@ -6,6 +6,10 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 
 import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
+import {
+  DEFAULT_CARD_UTILIZATION_THRESHOLD,
+  DEFAULT_LOW_MONEY_LEFT_THRESHOLD
+} from "@/lib/alerts/settings";
 import { authedRequest } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
 import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
@@ -62,10 +66,20 @@ interface DashboardData {
     lowMoneyLeftThreshold: number;
     utilizationThresholdPercent: number;
     dueReminderOffsets: number[];
+    deliveryHoursLocal: number[];
+    cooldownMinutes: number;
+    realtimePushEnabled: boolean;
+    cronPushEnabled: boolean;
+    enabledTypes: {
+      lowMoneyLeft: boolean;
+      cardUtilization: boolean;
+      cardDue: boolean;
+      billDue: boolean;
+    };
   };
   alerts: Array<{
     id: string;
-    type: "low-money-left" | "card-utilization" | "card-due";
+    type: "low-money-left" | "card-utilization" | "card-due" | "bill-due";
     severity: "info" | "warning" | "critical";
     title: string;
     message: string;
@@ -167,12 +181,30 @@ function buildCalendar(month: string, events: TimelineEvent[]): CalendarCell[][]
   return weeks;
 }
 
+function parseIntegerCsv(raw: string, min: number, max: number, order: "asc" | "desc"): number[] {
+  const parsed = raw
+    .split(",")
+    .map((entry) => Number.parseInt(entry.trim(), 10))
+    .filter((entry) => Number.isInteger(entry) && entry >= min && entry <= max);
+  const unique = Array.from(new Set(parsed));
+  return unique.sort((a, b) => (order === "asc" ? a - b : b - a));
+}
+
 export default function DashboardPage() {
   const { getIdToken } = useAuth();
   const [month, setMonth] = useState<string | null>(null);
   const [settingsDraft, setSettingsDraft] = useState({
-    lowMoneyLeftThreshold: "0",
-    utilizationThresholdPercent: "0"
+    lowMoneyLeftThreshold: String(DEFAULT_LOW_MONEY_LEFT_THRESHOLD),
+    utilizationThresholdPercent: String(DEFAULT_CARD_UTILIZATION_THRESHOLD),
+    dueReminderOffsets: "7,3,1",
+    deliveryHoursLocal: "8",
+    cooldownMinutes: "60",
+    realtimePushEnabled: true,
+    cronPushEnabled: true,
+    lowMoneyLeftEnabled: true,
+    cardUtilizationEnabled: true,
+    cardDueEnabled: true,
+    billDueEnabled: true
   });
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -192,7 +224,16 @@ export default function DashboardPage() {
     }
     setSettingsDraft({
       lowMoneyLeftThreshold: String(data.alertSettings.lowMoneyLeftThreshold),
-      utilizationThresholdPercent: String(data.alertSettings.utilizationThresholdPercent)
+      utilizationThresholdPercent: String(data.alertSettings.utilizationThresholdPercent),
+      dueReminderOffsets: (data.alertSettings.dueReminderOffsets || []).join(","),
+      deliveryHoursLocal: (data.alertSettings.deliveryHoursLocal || []).join(","),
+      cooldownMinutes: String(data.alertSettings.cooldownMinutes ?? 60),
+      realtimePushEnabled: data.alertSettings.realtimePushEnabled !== false,
+      cronPushEnabled: data.alertSettings.cronPushEnabled !== false,
+      lowMoneyLeftEnabled: data.alertSettings.enabledTypes?.lowMoneyLeft !== false,
+      cardUtilizationEnabled: data.alertSettings.enabledTypes?.cardUtilization !== false,
+      cardDueEnabled: data.alertSettings.enabledTypes?.cardDue !== false,
+      billDueEnabled: data.alertSettings.enabledTypes?.billDue !== false
     });
   }, [data?.alertSettings]);
 
@@ -246,6 +287,9 @@ export default function DashboardPage() {
   async function saveAlertSettings() {
     const lowMoneyLeftThreshold = Number.parseFloat(settingsDraft.lowMoneyLeftThreshold);
     const utilizationThresholdPercent = Number.parseFloat(settingsDraft.utilizationThresholdPercent);
+    const cooldownMinutes = Number.parseInt(settingsDraft.cooldownMinutes, 10);
+    const dueReminderOffsets = parseIntegerCsv(settingsDraft.dueReminderOffsets, 0, 31, "desc");
+    const deliveryHoursLocal = parseIntegerCsv(settingsDraft.deliveryHoursLocal, 0, 23, "asc");
 
     if (!Number.isFinite(lowMoneyLeftThreshold) || lowMoneyLeftThreshold < 0) {
       setSettingsMessage("Low money-left threshold must be a number >= 0.");
@@ -255,18 +299,49 @@ export default function DashboardPage() {
       setSettingsMessage("Utilization threshold must be a number >= 0.");
       return;
     }
+    if (!Number.isInteger(cooldownMinutes) || cooldownMinutes < 0 || cooldownMinutes > 1440) {
+      setSettingsMessage("Cooldown minutes must be an integer between 0 and 1440.");
+      return;
+    }
+    if (dueReminderOffsets.length === 0) {
+      setSettingsMessage("Due reminder days must include at least one value (0-31).");
+      return;
+    }
+    if (deliveryHoursLocal.length === 0) {
+      setSettingsMessage("Delivery hours must include at least one value (0-23).");
+      return;
+    }
 
     setSavingSettings(true);
     setSettingsMessage(null);
     try {
-      await authedRequest(getIdToken, "/api/alerts/settings", {
+      const response = await authedRequest<{
+        dispatch?: { sent: number; reason?: string };
+      }>(getIdToken, "/api/alerts/settings", {
         method: "PUT",
         body: JSON.stringify({
           lowMoneyLeftThreshold,
-          utilizationThresholdPercent
+          utilizationThresholdPercent,
+          dueReminderOffsets,
+          deliveryHoursLocal,
+          cooldownMinutes,
+          realtimePushEnabled: settingsDraft.realtimePushEnabled,
+          cronPushEnabled: settingsDraft.cronPushEnabled,
+          enabledTypes: {
+            lowMoneyLeft: settingsDraft.lowMoneyLeftEnabled,
+            cardUtilization: settingsDraft.cardUtilizationEnabled,
+            cardDue: settingsDraft.cardDueEnabled,
+            billDue: settingsDraft.billDueEnabled
+          }
         })
       });
-      setSettingsMessage("Alert thresholds saved.");
+      if ((response.dispatch?.sent || 0) > 0) {
+        setSettingsMessage(`Alert settings saved. Sent ${response.dispatch?.sent} live notification(s).`);
+      } else if (response.dispatch?.reason) {
+        setSettingsMessage(`Alert settings saved. ${response.dispatch.reason}`);
+      } else {
+        setSettingsMessage("Alert settings saved.");
+      }
       await refetch();
     } catch (requestError) {
       setSettingsMessage(requestError instanceof Error ? requestError.message : "Failed to save alert settings.");
@@ -363,12 +438,16 @@ export default function DashboardPage() {
           title="Smart alerts"
           subtitle="In-app and push alerts for low money-left forecast, high card utilization, and upcoming due dates."
           right={
-            <p className="text-sm text-[var(--ink-soft)]">
-              Due checks: {(data?.alertSettings?.dueReminderOffsets || []).join("/") || "7/3/1"} days
-            </p>
+            <div className="space-y-1 text-sm text-[var(--ink-soft)]">
+              <p>Due checks: {(data?.alertSettings?.dueReminderOffsets || []).join("/") || "7/3/1"} days</p>
+              <p>
+                Delivery hours (UK):{" "}
+                {(data?.alertSettings?.deliveryHoursLocal || []).map((hour) => `${hour}:00`).join(", ") || "8:00"}
+              </p>
+            </div>
           }
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+          <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
             <label className="block">
               <span className="label">Low money-left threshold (GBP)</span>
               <input
@@ -399,14 +478,145 @@ export default function DashboardPage() {
                 }
               />
             </label>
-            <button
-              type="button"
-              className="button-primary w-full xl:w-auto"
-              onClick={() => saveAlertSettings()}
-              disabled={savingSettings}
-            >
-              {savingSettings ? "Saving..." : "Save thresholds"}
-            </button>
+            <label className="block">
+              <span className="label">Due reminder days (0-31, CSV)</span>
+              <input
+                className="input mt-1"
+                value={settingsDraft.dueReminderOffsets}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    dueReminderOffsets: event.target.value
+                  }))
+                }
+                placeholder="7,3,1"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Delivery hours UK (0-23, CSV)</span>
+              <input
+                className="input mt-1"
+                value={settingsDraft.deliveryHoursLocal}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    deliveryHoursLocal: event.target.value
+                  }))
+                }
+                placeholder="8,18"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Push cooldown (minutes)</span>
+              <input
+                className="input mt-1"
+                type="number"
+                min={0}
+                max={1440}
+                step={1}
+                value={settingsDraft.cooldownMinutes}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    cooldownMinutes: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <div className="panel p-3">
+              <p className="label">Push modes</p>
+              <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.realtimePushEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      realtimePushEnabled: event.target.checked
+                    }))
+                  }
+                />
+                Realtime alerts after data changes
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.cronPushEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      cronPushEnabled: event.target.checked
+                    }))
+                  }
+                />
+                Background alerts via Vercel cron
+              </label>
+            </div>
+            <div className="panel p-3">
+              <p className="label">Alert types</p>
+              <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.lowMoneyLeftEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      lowMoneyLeftEnabled: event.target.checked
+                    }))
+                  }
+                />
+                Low money-left
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.cardUtilizationEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      cardUtilizationEnabled: event.target.checked
+                    }))
+                  }
+                />
+                Card utilization
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.cardDueEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      cardDueEnabled: event.target.checked
+                    }))
+                  }
+                />
+                Card due dates
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.billDueEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      billDueEnabled: event.target.checked
+                    }))
+                  }
+                />
+                Bills and adjustments due dates
+              </label>
+            </div>
+            <div className="flex items-end xl:justify-end">
+              <button
+                type="button"
+                className="button-primary w-full xl:w-auto"
+                onClick={() => saveAlertSettings()}
+                disabled={savingSettings}
+              >
+                {savingSettings ? "Saving..." : "Save alert settings"}
+              </button>
+            </div>
           </div>
 
           {settingsMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{settingsMessage}</p> : null}
@@ -426,7 +636,7 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : (
-            <p className="mt-3 text-sm text-[var(--ink-soft)]">No active alerts for the current thresholds.</p>
+            <p className="mt-3 text-sm text-[var(--ink-soft)]">No active alerts for the current settings.</p>
           )}
         </SectionPanel>
 

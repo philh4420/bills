@@ -2,7 +2,11 @@ import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
 import { buildSmartAlerts } from "@/lib/alerts/engine";
-import { normalizeAlertSettings, parseReminderOffsets } from "@/lib/alerts/settings";
+import {
+  normalizeAlertSettings,
+  parseDeliveryHours,
+  parseReminderOffsets
+} from "@/lib/alerts/settings";
 import { daysInMonth, getDatePartsInTimeZone } from "@/lib/cards/due-date";
 import { buildMonthTimeline } from "@/lib/dashboard/timeline";
 import { computeCardMonthProjections, computeMonthSnapshots, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
@@ -58,7 +62,8 @@ export async function GET(request: NextRequest) {
     ]);
 
     const reminderOffsets = parseReminderOffsets(process.env.CARD_REMINDER_OFFSETS);
-    const alertSettings = normalizeAlertSettings(persistedAlertSettings, reminderOffsets);
+    const deliveryHours = parseDeliveryHours(process.env.CARD_REMINDER_DELIVERY_HOURS);
+    const alertSettings = normalizeAlertSettings(persistedAlertSettings, reminderOffsets, deliveryHours);
 
     const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
     const snapshots = computeMonthSnapshots({
@@ -153,6 +158,7 @@ export async function GET(request: NextRequest) {
       selectedMonth,
       snapshot: normalizedSnapshot,
       cards,
+      timelineEvents: timeline.events,
       settings: alertSettings,
       projectedClosingByCardId,
       paymentByCardIdForCurrentMonth: currentMonthPayment?.byCardId || {}

@@ -32,6 +32,14 @@ function configureWebPush() {
   configured = true;
 }
 
+export function isWebPushConfigured(): boolean {
+  return Boolean(
+    process.env.WEB_PUSH_SUBJECT?.trim() &&
+      process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim() &&
+      process.env.WEB_PUSH_VAPID_PRIVATE_KEY?.trim()
+  );
+}
+
 export function getWebPushPublicKey(): string {
   return must("WEB_PUSH_VAPID_PUBLIC_KEY");
 }

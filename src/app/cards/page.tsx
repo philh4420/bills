@@ -48,6 +48,14 @@ interface PushTestResponse {
   details?: Array<{ endpoint: string; statusCode: number | null; message: string }>;
 }
 
+interface SmartAlertDispatchResponse {
+  ok: boolean;
+  sent: number;
+  failed: number;
+  deleted: number;
+  reason?: string;
+}
+
 type CardRecord = CardData["cards"][number];
 
 type DueTone = "neutral" | "ok" | "warn" | "danger";
@@ -593,6 +601,35 @@ export default function CardsPage() {
     }
   }
 
+  async function runSmartAlertCheck() {
+    setPushBusy(true);
+    setPushMessage(null);
+
+    try {
+      const result = await authedRequest<SmartAlertDispatchResponse>(getIdToken, "/api/notifications/dispatch", {
+        method: "POST",
+        body: JSON.stringify({ force: false })
+      });
+
+      if (result.sent > 0) {
+        setPushMessage(
+          `Smart alert check sent ${result.sent} notification(s)${result.failed > 0 ? `, ${result.failed} failed` : ""}.`
+        );
+        return;
+      }
+
+      if (result.reason) {
+        setPushMessage(`Smart alert check: ${result.reason}`);
+      } else {
+        setPushMessage("Smart alert check completed with no sends.");
+      }
+    } catch (error) {
+      setPushMessage(error instanceof Error ? error.message : "Smart alert check failed.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   function getCardDraft(card: CardRecord) {
     return (
       cardDrafts[card.id] || {
@@ -965,6 +1002,14 @@ export default function CardsPage() {
               <button
                 className="button-secondary w-full sm:w-auto"
                 type="button"
+                onClick={() => runSmartAlertCheck()}
+                disabled={pushBusy || !pushSubscribed}
+              >
+                Run smart alert check
+              </button>
+              <button
+                className="button-secondary w-full sm:w-auto"
+                type="button"
                 onClick={() => sendLocalNotificationPreview()}
                 disabled={pushBusy || notificationPermission !== "granted"}
               >
@@ -983,7 +1028,7 @@ export default function CardsPage() {
               </p>
             ) : null}
             <p className="mt-2 text-xs text-[var(--ink-soft)]">
-              Reminders are sent daily from Vercel Cron for cards due in 7, 3, and 1 days.
+              Alert timing, due-day offsets, and type toggles are configured in Dashboard → Smart alerts.
             </p>
           </div>
         </SectionPanel>

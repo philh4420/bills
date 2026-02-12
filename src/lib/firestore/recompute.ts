@@ -9,6 +9,7 @@ import {
   listMonthlyPayments,
   replaceMonthSnapshots
 } from "@/lib/firestore/repository";
+import { dispatchSmartAlertsForUser } from "@/lib/notifications/smart-alerts";
 
 export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
   const [
@@ -50,4 +51,10 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
   });
 
   await replaceMonthSnapshots(uid, snapshots);
+
+  try {
+    await dispatchSmartAlertsForUser(uid, { source: "realtime", now: new Date() });
+  } catch (error) {
+    console.error("Realtime smart alert dispatch failed", error);
+  }
 }

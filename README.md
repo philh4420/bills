@@ -54,16 +54,22 @@ npx web-push generate-vapid-keys
 - `WEB_PUSH_VAPID_PRIVATE_KEY`
 - `CRON_SECRET`
 - optional `CARD_REMINDER_OFFSETS` (default `7,3,1`)
+- optional `CARD_REMINDER_DELIVERY_HOURS` (default `8`, UK local hour)
 
 3. Keep `vercel.json` cron enabled:
-- `GET /api/cron/card-reminders` runs daily at `0 8 * * *` (UTC).
+- `GET /api/cron/card-reminders` runs hourly at `0 * * * *`.
 - On Hobby plan this is valid for free use.
 
 4. In the app:
 - Set `Due day` for cards on `/cards`.
 - Enable push notifications in `/cards` -> `Push reminders`.
+- Configure Smart alerts on `/dashboard`:
+  - thresholds
+  - due reminder offsets
+  - delivery hours
+  - realtime/cron toggles
+  - alert type toggles
 - On iOS, install from Safari to Home Screen and allow notifications.
-- Configure smart alert thresholds on `/dashboard`.
 
 ## API routes
 
@@ -82,4 +88,5 @@ npx web-push generate-vapid-keys
 - `GET|POST /api/purchases`, `PATCH /api/purchases/:id`
 - `GET /api/notifications/vapid-public-key`
 - `GET|POST|DELETE /api/notifications/subscriptions`
+- `POST /api/notifications/dispatch` (manual smart-alert check)
 - `GET|POST /api/cron/card-reminders` (Vercel cron or manual secure trigger)
