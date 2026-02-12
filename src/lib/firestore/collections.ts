@@ -17,7 +17,8 @@ export const COLLECTIONS = {
   reconciliations: "reconciliations",
   imports: "imports",
   pushSubscriptions: "pushSubscriptions",
-  alertSettings: "alertSettings"
+  alertSettings: "alertSettings",
+  alertStates: "alertStates"
 } as const;
 
 export type CollectionKey = keyof typeof COLLECTIONS;

@@ -1,5 +1,9 @@
 import { buildMonthTimeline } from "@/lib/dashboard/timeline";
-import { extendMonthlyPaymentsToYearEnd, computeMonthSnapshots } from "@/lib/formulas/engine";
+import {
+  computeCardMonthProjections,
+  extendMonthlyPaymentsToYearEnd,
+  computeMonthSnapshots
+} from "@/lib/formulas/engine";
 import {
   getBankBalance,
   listCardAccounts,
@@ -11,7 +15,10 @@ import {
   replaceLedgerEntriesForMonth,
   replaceMonthSnapshots
 } from "@/lib/firestore/repository";
-import { buildPlannedLedgerEntriesForMonth } from "@/lib/ledger/engine";
+import {
+  buildCardStatementLedgerEntriesForMonth,
+  buildPlannedLedgerEntriesForMonth
+} from "@/lib/ledger/engine";
 import { dispatchSmartAlertsForUser } from "@/lib/notifications/smart-alerts";
 import { syncDefaultRecurrenceRules } from "@/lib/recurrence/sync";
 import { monthKeyInTimeZone } from "@/lib/util/dates";
@@ -43,6 +50,8 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
     ]);
 
   const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
+  const cardProjections = computeCardMonthProjections(cards, timelinePayments);
+  const cardProjectionByMonth = new Map(cardProjections.map((projection) => [projection.month, projection]));
   const snapshots = computeMonthSnapshots({
     cards,
     monthlyPayments: timelinePayments,
@@ -83,8 +92,14 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
         events: timeline.events,
         nowIso
       });
+      const statementEntries = buildCardStatementLedgerEntriesForMonth({
+        month: payment.month,
+        cards,
+        projectionsByCardId: cardProjectionByMonth.get(payment.month)?.entries || {},
+        nowIso
+      });
 
-      await replaceLedgerEntriesForMonth(uid, payment.month, plannedEntries);
+      await replaceLedgerEntriesForMonth(uid, payment.month, [...plannedEntries, ...statementEntries]);
     })
   );
 

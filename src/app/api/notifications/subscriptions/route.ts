@@ -45,6 +45,11 @@ export async function POST(request: NextRequest) {
       auth: parsed.data.subscription.keys.auth,
       p256dh: parsed.data.subscription.keys.p256dh,
       userAgent: parsed.data.userAgent?.trim() || existing?.userAgent,
+      lastSuccessAt: existing?.lastSuccessAt ?? null,
+      lastFailureAt: null,
+      lastFailureReason: null,
+      endpointHealth: "healthy",
+      failureCount: 0,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     });

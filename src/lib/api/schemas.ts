@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+const minimumPaymentRuleSchema = z.object({
+  type: z.enum(["fixed", "percent"]),
+  value: z.number().positive()
+});
+
+const lateFeeRuleSchema = z.object({
+  type: z.literal("fixed"),
+  value: z.number().nonnegative()
+});
+
 export const monthKeySchema = z
   .string()
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must be YYYY-MM");
@@ -8,7 +18,11 @@ export const cardPatchSchema = z.object({
   limit: z.number().nonnegative().optional(),
   usedLimit: z.number().nonnegative().optional(),
   interestRateApr: z.number().min(0).max(1000).optional(),
-  dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional()
+  dueDayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
+  statementDay: z.number().int().min(1).max(31).nullable().optional(),
+  minimumPaymentRule: minimumPaymentRuleSchema.nullable().optional(),
+  interestFreeDays: z.number().int().min(0).max(120).nullable().optional(),
+  lateFeeRule: lateFeeRuleSchema.nullable().optional()
 });
 
 export const webPushSubscriptionSchema = z.object({
@@ -27,6 +41,10 @@ export const pushSubscriptionUpsertSchema = z.object({
 
 export const pushSubscriptionDeleteSchema = z.object({
   endpoint: z.url()
+});
+
+export const pushSubscriptionRepairSchema = z.object({
+  endpoint: z.url().optional()
 });
 
 export const lineItemCreateSchema = z.object({
@@ -105,6 +123,10 @@ export const alertSettingsPutSchema = z.object({
   cooldownMinutes: z.number().int().min(0).max(1440).optional(),
   realtimePushEnabled: z.boolean().optional(),
   cronPushEnabled: z.boolean().optional(),
+  quietHoursEnabled: z.boolean().optional(),
+  quietHoursStartLocal: z.number().int().min(0).max(23).optional(),
+  quietHoursEndLocal: z.number().int().min(0).max(23).optional(),
+  quietHoursTimezone: z.string().trim().min(1).max(120).optional(),
   enabledTypes: z
     .object({
       lowMoneyLeft: z.boolean(),
@@ -113,6 +135,14 @@ export const alertSettingsPutSchema = z.object({
       billDue: z.boolean()
     })
     .optional()
+});
+
+export const alertSnoozeSchema = z.object({
+  minutes: z.number().int().min(1).max(60 * 24 * 30).optional()
+});
+
+export const alertMuteSchema = z.object({
+  muted: z.boolean().optional()
 });
 
 export const loanedOutStatusSchema = z.enum(["outstanding", "paidBack"]);

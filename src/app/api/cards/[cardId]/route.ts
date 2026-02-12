@@ -51,6 +51,22 @@ export async function PATCH(
         parsed.data.dueDayOfMonth === undefined
           ? (existing.dueDayOfMonth ?? null)
           : parsed.data.dueDayOfMonth,
+      statementDay:
+        parsed.data.statementDay === undefined
+          ? (existing.statementDay ?? null)
+          : parsed.data.statementDay,
+      minimumPaymentRule:
+        parsed.data.minimumPaymentRule === undefined
+          ? (existing.minimumPaymentRule ?? null)
+          : parsed.data.minimumPaymentRule,
+      interestFreeDays:
+        parsed.data.interestFreeDays === undefined
+          ? (existing.interestFreeDays ?? null)
+          : parsed.data.interestFreeDays,
+      lateFeeRule:
+        parsed.data.lateFeeRule === undefined
+          ? (existing.lateFeeRule ?? null)
+          : parsed.data.lateFeeRule,
       createdAt: existing.createdAt,
       updatedAt: now
     });

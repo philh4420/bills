@@ -4,13 +4,41 @@ import { z } from "zod";
 import { withOwnerAuth } from "@/lib/api/handler";
 import {
   deletePushSubscription,
-  listPushSubscriptions
+  listPushSubscriptions,
+  updatePushSubscription
 } from "@/lib/firestore/repository";
 import { sendWebPushNotification } from "@/lib/notifications/web-push";
 import { toIsoNow } from "@/lib/util/dates";
 import { jsonError, jsonOk } from "@/lib/util/http";
 
 export const runtime = "nodejs";
+
+function parsePushErrorStatusCode(error: unknown): number | null {
+  if (typeof error !== "object" || error === null || !("statusCode" in error)) {
+    return null;
+  }
+  const raw = Number((error as { statusCode?: unknown }).statusCode);
+  return Number.isFinite(raw) ? raw : null;
+}
+
+function parsePushErrorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message?: unknown }).message || "Push send failed");
+  }
+  return "Push send failed";
+}
+
+async function bestEffortUpdatePushDiagnostics(
+  uid: string,
+  subscriptionId: string,
+  payload: Parameters<typeof updatePushSubscription>[2]
+): Promise<void> {
+  try {
+    await updatePushSubscription(uid, subscriptionId, payload);
+  } catch {
+    // Diagnostics updates should not break test route responses.
+  }
+}
 
 export async function POST(request: NextRequest) {
   return withOwnerAuth(request, async ({ uid }) => {
@@ -62,6 +90,15 @@ export async function POST(request: NextRequest) {
               badgeCount: 1
             }
           );
+          const successAt = toIsoNow();
+          await bestEffortUpdatePushDiagnostics(uid, subscription.id, {
+            lastSuccessAt: successAt,
+            lastFailureAt: null,
+            lastFailureReason: null,
+            endpointHealth: "healthy",
+            failureCount: 0,
+            updatedAt: successAt
+          });
 
           return {
             sent: 1,
@@ -70,16 +107,21 @@ export async function POST(request: NextRequest) {
             detail: null as null | { endpoint: string; statusCode: number | null; message: string }
           };
         } catch (error) {
-          const statusCode =
-            typeof error === "object" && error !== null && "statusCode" in error
-              ? Number((error as { statusCode?: unknown }).statusCode)
-              : null;
-          const message =
-            typeof error === "object" && error !== null && "message" in error
-              ? String((error as { message?: unknown }).message || "Push send failed")
-              : "Push send failed";
+          const statusCode = parsePushErrorStatusCode(error);
+          const message = parsePushErrorMessage(error);
+          const failureAt = toIsoNow();
+          const nextFailureCount = (subscription.failureCount ?? 0) + 1;
+          const reason =
+            `${statusCode ?? "error"} ${message}`.trim().slice(0, 240) || "push send failed";
 
           if (statusCode === 404 || statusCode === 410) {
+            await bestEffortUpdatePushDiagnostics(uid, subscription.id, {
+              lastFailureAt: failureAt,
+              lastFailureReason: reason,
+              endpointHealth: "stale",
+              failureCount: nextFailureCount,
+              updatedAt: failureAt
+            });
             await deletePushSubscription(uid, subscription.endpoint);
             return {
               sent: 0,
@@ -92,6 +134,14 @@ export async function POST(request: NextRequest) {
               }
             };
           }
+
+          await bestEffortUpdatePushDiagnostics(uid, subscription.id, {
+            lastFailureAt: failureAt,
+            lastFailureReason: reason,
+            endpointHealth: "degraded",
+            failureCount: nextFailureCount,
+            updatedAt: failureAt
+          });
 
           return {
             sent: 0,

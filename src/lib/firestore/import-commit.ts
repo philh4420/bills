@@ -48,6 +48,10 @@ export async function commitWorkbookImport(params: {
       usedLimit: card.usedLimit,
       interestRateApr: card.interestRateApr ?? 0,
       dueDayOfMonth: card.dueDayOfMonth ?? null,
+      statementDay: null,
+      minimumPaymentRule: null,
+      interestFreeDays: null,
+      lateFeeRule: null,
       createdAt: now,
       updatedAt: now
     };

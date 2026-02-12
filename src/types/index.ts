@@ -1,6 +1,18 @@
 export type CurrencyCode = "GBP";
 export type MonthKey = string;
 
+export type MinimumPaymentRuleType = "fixed" | "percent";
+
+export interface MinimumPaymentRule {
+  type: MinimumPaymentRuleType;
+  value: number;
+}
+
+export interface LateFeeRule {
+  type: "fixed";
+  value: number;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -17,6 +29,10 @@ export interface CardAccount {
   usedLimit: number;
   interestRateApr: number;
   dueDayOfMonth?: number | null;
+  statementDay?: number | null;
+  minimumPaymentRule?: MinimumPaymentRule | null;
+  interestFreeDays?: number | null;
+  lateFeeRule?: LateFeeRule | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,6 +43,11 @@ export interface PushSubscriptionRecord {
   auth: string;
   p256dh: string;
   userAgent?: string;
+  lastSuccessAt?: string | null;
+  lastFailureAt?: string | null;
+  lastFailureReason?: string | null;
+  endpointHealth?: "healthy" | "degraded" | "stale";
+  failureCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,7 +108,17 @@ export interface RecurrenceRule {
 }
 
 export type LedgerEntryStatus = "planned" | "posted" | "paid";
-export type LedgerEntrySourceType = "card-due" | "bill-due" | "adjustment" | "income" | "loaned-out";
+export type LedgerEntrySourceType =
+  | "card-due"
+  | "bill-due"
+  | "adjustment"
+  | "income"
+  | "loaned-out"
+  | "card-statement-balance"
+  | "card-due-amount"
+  | "card-minimum-payment"
+  | "card-interest-accrual"
+  | "card-late-fee";
 
 export interface LedgerEntry {
   id: string;
@@ -274,6 +305,10 @@ export interface AlertSettings {
   cooldownMinutes: number;
   realtimePushEnabled: boolean;
   cronPushEnabled: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStartLocal: number;
+  quietHoursEndLocal: number;
+  quietHoursTimezone: string;
   enabledTypes: {
     lowMoneyLeft: boolean;
     cardUtilization: boolean;
@@ -299,6 +334,15 @@ export interface SmartAlert {
   actionUrl: string;
   amount?: number;
   cardId?: string;
+}
+
+export interface AlertStateRecord {
+  id: string;
+  acknowledgedAt?: string | null;
+  snoozedUntil?: string | null;
+  muted: boolean;
+  mutedAt?: string | null;
+  updatedAt: string;
 }
 
 export type TimelineEventType = "card-due" | "bill-due" | "adjustment";

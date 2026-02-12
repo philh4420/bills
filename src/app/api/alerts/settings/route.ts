@@ -45,6 +45,10 @@ export async function PUT(request: NextRequest) {
         cooldownMinutes: parsed.data.cooldownMinutes ?? existing?.cooldownMinutes,
         realtimePushEnabled: parsed.data.realtimePushEnabled ?? existing?.realtimePushEnabled,
         cronPushEnabled: parsed.data.cronPushEnabled ?? existing?.cronPushEnabled,
+        quietHoursEnabled: parsed.data.quietHoursEnabled ?? existing?.quietHoursEnabled,
+        quietHoursStartLocal: parsed.data.quietHoursStartLocal ?? existing?.quietHoursStartLocal,
+        quietHoursEndLocal: parsed.data.quietHoursEndLocal ?? existing?.quietHoursEndLocal,
+        quietHoursTimezone: parsed.data.quietHoursTimezone ?? existing?.quietHoursTimezone,
         enabledTypes: parsed.data.enabledTypes ?? existing?.enabledTypes,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now

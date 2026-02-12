@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MobileEditDrawer } from "@/components/mobile-edit-drawer";
 import { ProtectedPage } from "@/components/protected-page";
@@ -21,6 +21,16 @@ interface CardData {
     usedLimit: number;
     interestRateApr: number;
     dueDayOfMonth?: number | null;
+    statementDay?: number | null;
+    minimumPaymentRule?: {
+      type: "fixed" | "percent";
+      value: number;
+    } | null;
+    interestFreeDays?: number | null;
+    lateFeeRule?: {
+      type: "fixed";
+      value: number;
+    } | null;
   }>;
 }
 
@@ -48,6 +58,36 @@ interface PushTestResponse {
   details?: Array<{ endpoint: string; statusCode: number | null; message: string }>;
 }
 
+interface PushDiagnosticsResponse {
+  summary: {
+    total: number;
+    healthy: number;
+    degraded: number;
+    stale: number;
+    autoCleaned: number;
+  };
+  subscriptions: Array<{
+    id: string;
+    endpoint: string;
+    endpointSuffix: string;
+    endpointHealth: "healthy" | "degraded" | "stale";
+    failureCount: number;
+    lastSuccessAt: string | null;
+    lastFailureAt: string | null;
+    lastFailureReason: string | null;
+    updatedAt: string;
+    userAgent: string | null;
+  }>;
+}
+
+interface PushRepairResponse {
+  ok: boolean;
+  targeted: number;
+  repaired: number;
+  removedStale: number;
+  message?: string;
+}
+
 interface SmartAlertDispatchResponse {
   ok: boolean;
   sent: number;
@@ -57,6 +97,18 @@ interface SmartAlertDispatchResponse {
 }
 
 type CardRecord = CardData["cards"][number];
+type MinimumPaymentRule = NonNullable<CardRecord["minimumPaymentRule"]>;
+type LateFeeRule = NonNullable<CardRecord["lateFeeRule"]>;
+type CardDraft = {
+  limit: number;
+  usedLimit: number;
+  interestRateApr: number;
+  dueDayOfMonth: number | null;
+  statementDay: number | null;
+  minimumPaymentRule: MinimumPaymentRule | null;
+  interestFreeDays: number | null;
+  lateFeeRule: LateFeeRule | null;
+};
 
 type DueTone = "neutral" | "ok" | "warn" | "danger";
 
@@ -74,6 +126,18 @@ function parseDueDayInput(value: string): number | null {
   }
 
   return Math.max(1, Math.min(31, parsed));
+}
+
+function parseOptionalIntegerInput(value: string, min: number, max: number): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed)) {
+    return null;
+  }
+  return Math.max(min, Math.min(max, parsed));
 }
 
 function dueToneClass(tone: DueTone): string {
@@ -136,6 +200,41 @@ function getDueMeta(dueDayOfMonth?: number | null): {
   };
 }
 
+function formatMinimumPaymentRule(rule: MinimumPaymentRule | null): string {
+  if (!rule) {
+    return "Not set";
+  }
+  if (rule.type === "percent") {
+    return `${rule.value.toFixed(2)}%`;
+  }
+  return formatGBP(rule.value);
+}
+
+function diagnosticsHealthChipClass(health: "healthy" | "degraded" | "stale"): string {
+  if (health === "degraded") {
+    return "border border-amber-200 bg-amber-50 text-amber-800";
+  }
+  if (health === "stale") {
+    return "border border-red-200 bg-red-50 text-red-700";
+  }
+  return "border border-emerald-200 bg-emerald-50 text-emerald-800";
+}
+
+function formatDiagnosticTimestamp(value: string | null): string {
+  if (!value) {
+    return "Never";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Never";
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(parsed);
+}
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -174,15 +273,21 @@ export default function CardsPage() {
   const getIdTokenRef = useRef(getIdToken);
   const [month, setMonth] = useState<string>("");
   const [message, setMessage] = useState<string | null>(null);
-  const [cardDrafts, setCardDrafts] = useState<
-    Record<string, { limit: number; usedLimit: number; interestRateApr: number; dueDayOfMonth: number | null }>
-  >({});
+  const [cardDrafts, setCardDrafts] = useState<Record<string, CardDraft>>({});
   const [paymentDraft, setPaymentDraft] = useState<Record<string, number>>({});
   const [formulaVariantId, setFormulaVariantId] = useState("money-left-standard");
   const [pushBusy, setPushBusy] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [serverSubscriptionCount, setServerSubscriptionCount] = useState(0);
+  const [pushDiagnostics, setPushDiagnostics] = useState<PushDiagnosticsResponse["subscriptions"]>([]);
+  const [pushDiagnosticsSummary, setPushDiagnosticsSummary] = useState<PushDiagnosticsResponse["summary"]>({
+    total: 0,
+    healthy: 0,
+    degraded: 0,
+    stale: 0,
+    autoCleaned: 0
+  });
   const [currentPushEndpoint, setCurrentPushEndpoint] = useState<string | null>(null);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<string>("default");
@@ -234,16 +339,17 @@ export default function CardsPage() {
       return;
     }
 
-    const next: Record<
-      string,
-      { limit: number; usedLimit: number; interestRateApr: number; dueDayOfMonth: number | null }
-    > = {};
+    const next: Record<string, CardDraft> = {};
     cardsQuery.data.cards.forEach((card) => {
       next[card.id] = {
         limit: card.limit,
         usedLimit: card.usedLimit,
         interestRateApr: card.interestRateApr ?? 0,
-        dueDayOfMonth: card.dueDayOfMonth ?? null
+        dueDayOfMonth: card.dueDayOfMonth ?? null,
+        statementDay: card.statementDay ?? null,
+        minimumPaymentRule: card.minimumPaymentRule ?? null,
+        interestFreeDays: card.interestFreeDays ?? null,
+        lateFeeRule: card.lateFeeRule ?? null
       };
     });
     setCardDrafts(next);
@@ -261,6 +367,28 @@ export default function CardsPage() {
   useEffect(() => {
     getIdTokenRef.current = getIdToken;
   }, [getIdToken]);
+
+  const refreshPushDiagnostics = useCallback(async (getToken: () => Promise<string | null>) => {
+    try {
+      const diagnostics = await authedRequest<PushDiagnosticsResponse>(
+        getToken,
+        "/api/notifications/diagnostics"
+      );
+      setPushDiagnostics(diagnostics.subscriptions);
+      setPushDiagnosticsSummary(diagnostics.summary);
+      setServerSubscriptionCount(diagnostics.summary.total);
+    } catch {
+      setPushDiagnostics([]);
+      setPushDiagnosticsSummary({
+        total: 0,
+        healthy: 0,
+        degraded: 0,
+        stale: 0,
+        autoCleaned: 0
+      });
+      setServerSubscriptionCount(0);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -302,6 +430,7 @@ export default function CardsPage() {
     setPushSupported(supported);
 
     if (!supported) {
+      void refreshPushDiagnostics(getIdTokenRef.current);
       return cleanup;
     }
 
@@ -314,39 +443,27 @@ export default function CardsPage() {
       const subscription = await registration.pushManager.getSubscription();
       setPushSubscribed(Boolean(subscription));
       setCurrentPushEndpoint(subscription?.endpoint ?? null);
-      try {
-        const server = await authedRequest<{
-          subscriptions: Array<{ id: string; endpoint: string; updatedAt?: string }>
-        }>(getIdTokenRef.current, "/api/notifications/subscriptions");
-        setServerSubscriptionCount(server.subscriptions.length);
-      } catch {
-        setServerSubscriptionCount(0);
-      }
+      await refreshPushDiagnostics(getIdTokenRef.current);
     })();
 
     return cleanup;
-  }, []);
+  }, [refreshPushDiagnostics]);
 
   async function refreshPushStateFromDeviceAndServer() {
-    if (!pushSupported || typeof window === "undefined") {
+    if (typeof window === "undefined") {
       return;
     }
 
-    const registration =
-      (await navigator.serviceWorker.getRegistration()) ||
-      (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
-    const subscription = await registration.pushManager.getSubscription();
-    setPushSubscribed(Boolean(subscription));
-    setCurrentPushEndpoint(subscription?.endpoint ?? null);
-
-    try {
-      const server = await authedRequest<{
-        subscriptions: Array<{ id: string; endpoint: string; updatedAt?: string }>
-      }>(getIdToken, "/api/notifications/subscriptions");
-      setServerSubscriptionCount(server.subscriptions.length);
-    } catch {
-      setServerSubscriptionCount(0);
+    if (pushSupported) {
+      const registration =
+        (await navigator.serviceWorker.getRegistration()) ||
+        (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+      const subscription = await registration.pushManager.getSubscription();
+      setPushSubscribed(Boolean(subscription));
+      setCurrentPushEndpoint(subscription?.endpoint ?? null);
     }
+
+    await refreshPushDiagnostics(getIdToken);
   }
 
   async function saveCard(cardId: string) {
@@ -356,10 +473,46 @@ export default function CardsPage() {
       return;
     }
 
+    if (
+      !Number.isFinite(draft.limit) ||
+      !Number.isFinite(draft.usedLimit) ||
+      !Number.isFinite(draft.interestRateApr)
+    ) {
+      setMessage("Card values must be valid numbers.");
+      return;
+    }
+
+    const minimumPaymentRule =
+      draft.minimumPaymentRule &&
+      Number.isFinite(draft.minimumPaymentRule.value) &&
+      draft.minimumPaymentRule.value > 0
+        ? {
+            type: draft.minimumPaymentRule.type,
+            value: draft.minimumPaymentRule.value
+          }
+        : null;
+
+    const lateFeeRule =
+      draft.lateFeeRule && Number.isFinite(draft.lateFeeRule.value) && draft.lateFeeRule.value >= 0
+        ? {
+            type: "fixed" as const,
+            value: draft.lateFeeRule.value
+          }
+        : null;
+
     try {
       await authedRequest(getIdToken, `/api/cards/${cardId}`, {
         method: "PATCH",
-        body: JSON.stringify(draft)
+        body: JSON.stringify({
+          limit: draft.limit,
+          usedLimit: draft.usedLimit,
+          interestRateApr: draft.interestRateApr,
+          dueDayOfMonth: draft.dueDayOfMonth ?? null,
+          statementDay: draft.statementDay ?? null,
+          minimumPaymentRule,
+          interestFreeDays: draft.interestFreeDays ?? null,
+          lateFeeRule
+        })
       });
 
       const cardName = cardsQuery.data?.cards.find((entry) => entry.id === cardId)?.name || cardId;
@@ -520,6 +673,45 @@ export default function CardsPage() {
     }
   }
 
+  async function repairPushSubscription() {
+    setPushBusy(true);
+    setPushMessage(null);
+
+    try {
+      let endpoint: string | null = currentPushEndpoint;
+      if (pushSupported && typeof window !== "undefined") {
+        const registration =
+          (await navigator.serviceWorker.getRegistration()) ||
+          (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+        const subscription = await registration.pushManager.getSubscription();
+        endpoint = subscription?.endpoint ?? endpoint;
+      }
+
+      const result = await authedRequest<PushRepairResponse>(
+        getIdToken,
+        "/api/notifications/subscriptions/repair",
+        {
+          method: "POST",
+          body: JSON.stringify(endpoint ? { endpoint } : {})
+        }
+      );
+
+      await refreshPushStateFromDeviceAndServer();
+      if (result.message) {
+        setPushMessage(result.message);
+        return;
+      }
+
+      setPushMessage(
+        `Repair complete: repaired ${result.repaired}${result.removedStale > 0 ? `, removed stale ${result.removedStale}` : ""}.`
+      );
+    } catch (error) {
+      setPushMessage(formatApiClientError(error, "Failed to repair push subscription."));
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   async function sendTestPushNotification() {
     if (!pushSubscribed) {
       setPushMessage("Enable push reminders first.");
@@ -644,7 +836,11 @@ export default function CardsPage() {
         limit: card.limit,
         usedLimit: card.usedLimit,
         interestRateApr: card.interestRateApr ?? 0,
-        dueDayOfMonth: card.dueDayOfMonth ?? null
+        dueDayOfMonth: card.dueDayOfMonth ?? null,
+        statementDay: card.statementDay ?? null,
+        minimumPaymentRule: card.minimumPaymentRule ?? null,
+        interestFreeDays: card.interestFreeDays ?? null,
+        lateFeeRule: card.lateFeeRule ?? null
       }
     );
   }
@@ -659,7 +855,7 @@ export default function CardsPage() {
       <div className="space-y-4">
         <SectionPanel
           title="Card limits"
-          subtitle="Update limits, used balances, APR, and due dates. Interest and projected balances recalculate per selected month."
+          subtitle="Update limits, used balances, APR, due dates, and statement rules. Interest and projected balances recalculate per selected month."
         >
           {cardsQuery.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading cards...</p> : null}
           {cardsQuery.error ? <p className="text-sm text-red-700">{(cardsQuery.error as Error).message}</p> : null}
@@ -698,12 +894,24 @@ export default function CardsPage() {
                       <span className="mobile-edit-keyval-value">{draft.interestRateApr.toFixed(2)}%</span>
                     </div>
                     <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Statement day</span>
+                      <span className="mobile-edit-keyval-value">{draft.statementDay || "Not set"}</span>
+                    </div>
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Min payment</span>
+                      <span className="mobile-edit-keyval-value">{formatMinimumPaymentRule(draft.minimumPaymentRule)}</span>
+                    </div>
+                    <div className="mobile-edit-keyval">
                       <span className="mobile-edit-keyval-label">Available</span>
                       <span className="mobile-edit-keyval-value">{formatGBP(available)}</span>
                     </div>
                     <div className="mobile-edit-keyval">
                       <span className="mobile-edit-keyval-label">Interest ({selectedMonthLabel})</span>
                       <span className="mobile-edit-keyval-value">{formatGBP(projection?.interestAdded ?? 0)}</span>
+                    </div>
+                    <div className="mobile-edit-keyval">
+                      <span className="mobile-edit-keyval-label">Late fee ({selectedMonthLabel})</span>
+                      <span className="mobile-edit-keyval-value">{formatGBP(projection?.lateFeeAdded ?? 0)}</span>
                     </div>
                     <div className="mobile-edit-keyval">
                       <span className="mobile-edit-keyval-label">Projected used ({selectedMonthLabel})</span>
@@ -811,6 +1019,125 @@ export default function CardsPage() {
                         </option>
                       ))}
                     </select>
+                  </div>
+                  <div>
+                    <p className="label">Statement day (1-31)</p>
+                    <select
+                      className="input mt-1"
+                      value={mobileCardDraft.statementDay ? String(mobileCardDraft.statementDay) : ""}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: {
+                            ...mobileCardDraft,
+                            statementDay: parseDueDayInput(event.target.value)
+                          }
+                        }))
+                      }
+                    >
+                      <option value="">Not set</option>
+                      {DUE_DAY_OPTIONS.map((day) => (
+                        <option key={`${mobileCard.id}-drawer-statement-${day}`} value={day}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <p className="label">Interest-free days</p>
+                    <input
+                      className="input mt-1"
+                      type="number"
+                      min={0}
+                      max={120}
+                      value={mobileCardDraft.interestFreeDays ?? ""}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: {
+                            ...mobileCardDraft,
+                            interestFreeDays: parseOptionalIntegerInput(event.target.value, 0, 120)
+                          }
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <p className="label">Minimum payment type</p>
+                    <select
+                      className="input mt-1"
+                      value={mobileCardDraft.minimumPaymentRule?.type || ""}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: {
+                            ...mobileCardDraft,
+                            minimumPaymentRule: event.target.value
+                              ? {
+                                  type: event.target.value as MinimumPaymentRule["type"],
+                                  value: mobileCardDraft.minimumPaymentRule?.value ?? 1
+                                }
+                              : null
+                          }
+                        }))
+                      }
+                    >
+                      <option value="">Not set</option>
+                      <option value="fixed">Fixed amount</option>
+                      <option value="percent">Percent of statement</option>
+                    </select>
+                  </div>
+                  <div>
+                    <p className="label">
+                      Minimum payment value
+                      {mobileCardDraft.minimumPaymentRule?.type === "percent" ? " (%)" : " (GBP)"}
+                    </p>
+                    <input
+                      className="input mt-1"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      disabled={!mobileCardDraft.minimumPaymentRule}
+                      value={mobileCardDraft.minimumPaymentRule?.value ?? ""}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: {
+                            ...mobileCardDraft,
+                            minimumPaymentRule: mobileCardDraft.minimumPaymentRule
+                              ? {
+                                  ...mobileCardDraft.minimumPaymentRule,
+                                  value: Number(event.target.value)
+                                }
+                              : null
+                          }
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <p className="label">Late fee (GBP)</p>
+                    <input
+                      className="input mt-1"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={mobileCardDraft.lateFeeRule?.value ?? ""}
+                      onChange={(event) =>
+                        setCardDrafts((prev) => ({
+                          ...prev,
+                          [mobileCard.id]: {
+                            ...mobileCardDraft,
+                            lateFeeRule: event.target.value.trim()
+                              ? {
+                                  type: "fixed",
+                                  value: Number(event.target.value)
+                                }
+                              : null
+                          }
+                        }))
+                      }
+                    />
                   </div>
                   <div className="sm:col-span-2">
                     <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -954,6 +1281,148 @@ export default function CardsPage() {
               </tbody>
             </table>
           </div>
+
+          <p className="label hidden xl:block">Statement cycle rules</p>
+          <div className="table-wrap hidden xl:block">
+            <table>
+              <thead>
+                <tr>
+                  <th>Card</th>
+                  <th>Statement Day</th>
+                  <th>Interest-Free Days</th>
+                  <th>Minimum Payment Rule</th>
+                  <th>Late Fee (GBP)</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cards.map((card) => {
+                  const draft = getCardDraft(card);
+                  return (
+                    <tr key={`statement-${card.id}`}>
+                      <td>{card.name}</td>
+                      <td>
+                        <select
+                          className="input w-full"
+                          value={draft.statementDay ? String(draft.statementDay) : ""}
+                          onChange={(event) =>
+                            setCardDrafts((prev) => ({
+                              ...prev,
+                              [card.id]: {
+                                ...draft,
+                                statementDay: parseDueDayInput(event.target.value)
+                              }
+                            }))
+                          }
+                        >
+                          <option value="">Not set</option>
+                          {DUE_DAY_OPTIONS.map((day) => (
+                            <option key={`statement-day-${card.id}-${day}`} value={day}>
+                              {day}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          className="input w-full"
+                          type="number"
+                          min={0}
+                          max={120}
+                          value={draft.interestFreeDays ?? ""}
+                          onChange={(event) =>
+                            setCardDrafts((prev) => ({
+                              ...prev,
+                              [card.id]: {
+                                ...draft,
+                                interestFreeDays: parseOptionalIntegerInput(event.target.value, 0, 120)
+                              }
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_110px]">
+                          <select
+                            className="input w-full"
+                            value={draft.minimumPaymentRule?.type || ""}
+                            onChange={(event) =>
+                              setCardDrafts((prev) => ({
+                                ...prev,
+                                [card.id]: {
+                                  ...draft,
+                                  minimumPaymentRule: event.target.value
+                                    ? {
+                                        type: event.target.value as MinimumPaymentRule["type"],
+                                        value: draft.minimumPaymentRule?.value ?? 1
+                                      }
+                                    : null
+                                }
+                              }))
+                            }
+                          >
+                            <option value="">Not set</option>
+                            <option value="fixed">Fixed</option>
+                            <option value="percent">Percent</option>
+                          </select>
+                          <input
+                            className="input w-full"
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            disabled={!draft.minimumPaymentRule}
+                            value={draft.minimumPaymentRule?.value ?? ""}
+                            onChange={(event) =>
+                              setCardDrafts((prev) => ({
+                                ...prev,
+                                [card.id]: {
+                                  ...draft,
+                                  minimumPaymentRule: draft.minimumPaymentRule
+                                    ? {
+                                        ...draft.minimumPaymentRule,
+                                        value: Number(event.target.value)
+                                      }
+                                    : null
+                                }
+                              }))
+                            }
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <input
+                          className="input w-full"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={draft.lateFeeRule?.value ?? ""}
+                          onChange={(event) =>
+                            setCardDrafts((prev) => ({
+                              ...prev,
+                              [card.id]: {
+                                ...draft,
+                                lateFeeRule: event.target.value.trim()
+                                  ? {
+                                      type: "fixed",
+                                      value: Number(event.target.value)
+                                    }
+                                  : null
+                              }
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <button className="button-secondary" type="button" onClick={() => saveCard(card.id)}>
+                          Save
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </SectionPanel>
 
         <SectionPanel
@@ -968,6 +1437,16 @@ export default function CardsPage() {
             <p className="text-xs text-[var(--ink-soft)]">
               Saved subscriptions:{" "}
               <span className="font-medium text-[var(--ink-main)]">{serverSubscriptionCount}</span>
+            </p>
+            <p className="text-xs text-[var(--ink-soft)]">
+              Health:{" "}
+              <span className="font-medium text-[var(--ink-main)]">
+                {pushDiagnosticsSummary.healthy} healthy
+              </span>
+              {" · "}
+              <span className="font-medium text-[var(--ink-main)]">
+                {pushDiagnosticsSummary.degraded} degraded
+              </span>
             </p>
             <p className="text-sm text-[var(--ink-soft)]">
               Status:{" "}
@@ -1002,6 +1481,14 @@ export default function CardsPage() {
               <button
                 className="button-secondary w-full sm:w-auto"
                 type="button"
+                onClick={() => repairPushSubscription()}
+                disabled={pushBusy || serverSubscriptionCount === 0}
+              >
+                Repair subscription
+              </button>
+              <button
+                className="button-secondary w-full sm:w-auto"
+                type="button"
                 onClick={() => sendTestPushNotification()}
                 disabled={pushBusy || !pushSubscribed}
               >
@@ -1029,6 +1516,40 @@ export default function CardsPage() {
               <p className="mt-2 text-[11px] text-[var(--ink-soft)]">
                 Current device endpoint: …{currentPushEndpoint.slice(-18)}
               </p>
+            ) : null}
+            {pushDiagnosticsSummary.autoCleaned > 0 ? (
+              <p className="mt-2 text-[11px] text-[var(--ink-soft)]">
+                Auto-cleaned stale subscriptions: {pushDiagnosticsSummary.autoCleaned}
+              </p>
+            ) : null}
+            {pushDiagnostics.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                <p className="label">Device diagnostics</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {pushDiagnostics.map((entry) => (
+                    <div className="rounded-xl border border-[var(--ring)] bg-white/60 p-3" key={entry.id}>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-[var(--ink-main)]">…{entry.endpointSuffix}</p>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${diagnosticsHealthChipClass(entry.endpointHealth)}`}
+                        >
+                          {entry.endpointHealth}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+                        Last success: {formatDiagnosticTimestamp(entry.lastSuccessAt)}
+                      </p>
+                      <p className="text-[11px] text-[var(--ink-soft)]">
+                        Last failure: {formatDiagnosticTimestamp(entry.lastFailureAt)}
+                      </p>
+                      <p className="text-[11px] text-[var(--ink-soft)]">
+                        Failures: {entry.failureCount}
+                        {entry.lastFailureReason ? ` · ${entry.lastFailureReason}` : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : null}
             {isAppleMobileDevice && !isInstalledApp ? (
               <p className="mt-2 text-xs text-[var(--ink-soft)]">

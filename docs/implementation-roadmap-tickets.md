@@ -139,66 +139,140 @@ This is the execution checklist version of the roadmap. Each ticket includes API
 
 ## v1.2 (Card Lifecycle + Alerting + Ops)
 
-### BIL-121 - Card Statement Lifecycle Model
-- API:
-  - Extend card endpoints for `statementDay`, `minimumPayment`, `interestFreeDays`, `lateFee`.
-- UI:
-  - Cards form fields and projections panel updates.
-- Firestore schema:
-  - Add statement fields to `cardAccounts`.
-- Tests:
-  - Card cycle math unit tests.
+### Phase v1.2-A - Statement Rule Foundation (Build First)
 
-### BIL-122 - Statement-Aware Ledger Entries
+#### BIL-121 - Extend Card Model With Statement Rules
+- Goal:
+  - Add statement rule fields on cards: `statementDay`, `minimumPaymentRule`, `interestFreeDays`, `lateFeeRule`.
 - API:
-  - Recompute pipeline emits statement, minimum due, late fee entries.
+  - Extend `GET /api/cards` response and `PATCH /api/cards/:cardId` payload validation.
 - UI:
-  - Ledger and timeline badges for statement events.
+  - Add editable statement rule inputs on Cards page.
 - Firestore schema:
-  - Reuse `ledgerEntries`.
+  - Extend `users/{uid}/cardAccounts/{cardId}` with:
+    - `statementDay: number | null`
+    - `minimumPaymentRule: { type: "fixed" | "percent"; value: number } | null`
+    - `interestFreeDays: number | null`
+    - `lateFeeRule: { type: "fixed"; value: number } | null`
 - Tests:
-  - End-to-end cycle simulations across two months.
+  - Model validation tests for rule payloads.
 
-### BIL-123 - Smart Alert Actions (Snooze/Mute/Acknowledge)
+#### BIL-122 - Statement-Cycle Calculator + Ledger Emission
+- Goal:
+  - Generate ledger entries for statement lifecycle:
+    - statement balance
+    - due amount
+    - minimum payment
+    - interest accrual
+    - late fee
 - API:
-  - `POST /api/alerts/:id/snooze`, `.../ack`, `.../mute`.
+  - Recompute pipeline enhancement (no new public route required).
 - UI:
-  - Alert action buttons and state chips.
+  - Timeline and reconciliation ledger show new card lifecycle entries.
 - Firestore schema:
-  - `users/{uid}/alertStates/{alertId}`.
-- Tests:
-  - Action state transition tests.
+  - Reuse `users/{uid}/ledgerEntries/{entryId}` with new `sourceType` values for statement events.
 
-### BIL-124 - Quiet Hours and Per-Type Delivery Policy
-- API:
-  - Extend alert settings API for quiet hours and per-type windows.
-- UI:
-  - Smart alerts settings controls.
-- Firestore schema:
-  - Extend `alertSettings`.
-- Tests:
-  - Dispatch suppression tests during quiet windows.
 
-### BIL-125 - Device Delivery Diagnostics
-- API:
-  - `GET /api/notifications/diagnostics`.
-- UI:
-  - Device diagnostics panel and stale endpoint repair action.
-- Firestore schema:
-  - Extend `pushSubscriptions` with `lastSuccessAt`, `lastFailureAt`, `lastFailureCode`.
-- Tests:
-  - Notification send pipeline diagnostics tests.
+### Phase v1.2-B - Alert State + Dispatch Controls
 
-### BIL-126 - Backup/Restore + Export
+#### BIL-123 - Smart Alert State Model
+- Goal:
+  - Add per-alert state: `acknowledged`, `snoozedUntil`, `muted`, and per-alert-type toggles.
 - API:
-  - `GET /api/export?format=json|csv`
-  - `POST /api/restore` (json snapshot upload)
+  - `POST /api/alerts/:id/ack`
+  - `POST /api/alerts/:id/snooze`
+  - `POST /api/alerts/:id/mute`
+  - `PUT /api/alerts/settings` adds type-toggle controls.
 - UI:
-  - Backup/restore controls in settings.
+  - Smart alert actions: Acknowledge, Snooze, Mute.
 - Firestore schema:
-  - Optional `backups` metadata collection.
+  - `users/{uid}/alertStates/{alertId}` with:
+    - `acknowledgedAt`, `snoozedUntil`, `muted`, `mutedAt`, `updatedAt`
+  - Extend `users/{uid}/alertSettings/primary` with per-type toggles.
 - Tests:
-  - Roundtrip import/export integrity tests.
+  - Alert-state transition matrix and dedupe behavior checks.
+
+#### BIL-124 - Quiet Hours + Realtime/Cron Enforcement
+- Goal:
+  - Support quiet hours and enforce in both realtime dispatch and cron dispatch.
+- API:
+  - Extend `PUT /api/alerts/settings` with quiet-hour window settings.
+  - Ensure `/api/notifications/dispatch` and cron route both apply quiet-hour suppression.
+- UI:
+  - Quiet hours controls in smart alert settings.
+- Firestore schema:
+  - Extend `alertSettings`:
+    - `quietHoursEnabled`
+    - `quietHoursStartLocal`
+    - `quietHoursEndLocal`
+    - `quietHoursTimezone` (`Europe/London`)
+
+
+### Phase v1.2-C - Notification Reliability + Ops UX
+
+#### BIL-125 - Device Notification Diagnostics
+- Goal:
+  - Track per-device health: last success, last failure reason, endpoint health, stale auto-clean.
+- API:
+  - `GET /api/notifications/diagnostics`
+  - Extend existing send paths to update diagnostics metadata.
+- UI:
+  - Diagnostics panel with device rows and health chips.
+- Firestore schema:
+  - Extend `users/{uid}/pushSubscriptions/{subscriptionId}`:
+    - `lastSuccessAt`, `lastFailureAt`, `lastFailureReason`, `endpointHealth`, `failureCount`
+- Tests:
+  - Delivery diagnostics update behavior on success/failure and stale endpoint removal.
+
+#### BIL-126 - Manual Subscription Repair Flow
+- Goal:
+  - Add one-click repair for broken/stale push subscriptions.
+- API:
+  - `POST /api/notifications/subscriptions/repair` (or equivalent idempotent repair route).
+- UI:
+  - “Repair subscription” action in push reminders section.
+- Firestore schema:
+  - Reuse `pushSubscriptions`; update health and refreshed endpoint metadata.
+- Tests:
+  - Repair flow behavior for stale, missing, and healthy subscription states.
+
+### Phase v1.2-D - Data Portability and Recovery
+
+#### BIL-127 - One-Click Export (CSV + JSON Snapshot)
+- Goal:
+  - Export complete workspace data in CSV and JSON formats.
+- API:
+  - `GET /api/export?format=csv`
+  - `GET /api/export?format=json`
+- UI:
+  - Export controls with clear file type labels.
+- Firestore schema:
+  - No required schema changes.
+- Tests:
+  - Export completeness checks against core collections.
+
+#### BIL-128 - Backup/Restore Flow
+- Goal:
+  - Download backup and restore from uploaded JSON snapshot.
+- API:
+  - `POST /api/restore` (dry-run validation + commit mode)
+  - Optional `GET /api/backups` metadata endpoint
+- UI:
+  - Backup/restore panel with upload, preview summary, and confirm restore.
+- Firestore schema:
+  - Optional `users/{uid}/backups/{backupId}` metadata for restore history.
+- Tests:
+  - Restore validation checks and post-restore recompute consistency.
+
+### v1.2 Release Gate (Must All Pass)
+- Gate 1:
+  - Card due/statement behavior validated across two full monthly cycles.
+- Gate 2:
+  - Snooze/mute/quiet hours enforced in both realtime and cron paths.
+- Gate 3:
+  - Export + restore roundtrip reproduces data exactly in a test workspace.
+- Gate 4:
+  - Build pipeline remains green: typecheck, lint, production build.
 
 ## v2 (Auditability + Undo)
 

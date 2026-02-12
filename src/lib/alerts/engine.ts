@@ -19,10 +19,23 @@ function severityRank(value: SmartAlert["severity"]): number {
   return 1;
 }
 
+function resolveCardDueDay(card: Pick<CardAccount, "dueDayOfMonth" | "statementDay" | "interestFreeDays">): number | null {
+  if (card.dueDayOfMonth && card.dueDayOfMonth >= 1) {
+    return card.dueDayOfMonth;
+  }
+  if (!card.statementDay || card.statementDay < 1) {
+    return null;
+  }
+  const graceDays = Math.max(0, card.interestFreeDays ?? 0);
+  return Math.max(1, Math.min(31, card.statementDay + graceDays));
+}
+
 export function buildSmartAlerts(params: {
   selectedMonth: string;
   snapshot: Pick<MonthSnapshot, "moneyLeft"> | null;
-  cards: Array<Pick<CardAccount, "id" | "name" | "limit" | "usedLimit" | "dueDayOfMonth">>;
+  cards: Array<
+    Pick<CardAccount, "id" | "name" | "limit" | "usedLimit" | "dueDayOfMonth" | "statementDay" | "interestFreeDays">
+  >;
   timelineEvents?: Array<
     Pick<MonthTimelineEvent, "id" | "type" | "title" | "subtitle" | "date" | "amount" | "category">
   >;
@@ -98,11 +111,12 @@ export function buildSmartAlerts(params: {
 
   if (settings.enabledTypes.cardDue) {
     cards.forEach((card) => {
-      if (!card.dueDayOfMonth || card.dueDayOfMonth < 1) {
+      const dueDay = resolveCardDueDay(card);
+      if (!dueDay) {
         return;
       }
 
-      const due = computeUpcomingDueDate(card.dueDayOfMonth, now, APP_TIMEZONE);
+      const due = computeUpcomingDueDate(dueDay, now, APP_TIMEZONE);
       if (!dueOffsetSet.has(due.daysUntil)) {
         return;
       }

@@ -68,7 +68,7 @@ function isMonthInRange(month: string, startMonth: string, endMonth?: string): b
 
 export function buildMonthTimeline(params: {
   selectedMonth: string;
-  cards: Array<Pick<CardAccount, "id" | "name" | "dueDayOfMonth">>;
+  cards: Array<Pick<CardAccount, "id" | "name" | "dueDayOfMonth" | "statementDay" | "interestFreeDays">>;
   monthlyPayments: Pick<MonthlyCardPayments, "byCardId"> | null;
   income: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
   incomePaydayOverridesByIncomeId: Record<string, number[]>;
@@ -96,6 +96,12 @@ export function buildMonthTimeline(params: {
   const events: MonthTimelineEvent[] = [];
 
   cards.forEach((card) => {
+    const derivedDueDay =
+      card.dueDayOfMonth ??
+      (card.statementDay
+        ? clampDay(year, monthNumber, (card.statementDay ?? 1) + Math.max(0, card.interestFreeDays ?? 0))
+        : null);
+
     events.push(
       toEvent({
         id: `card-${card.id}-${selectedMonth}`,
@@ -105,7 +111,7 @@ export function buildMonthTimeline(params: {
         category: "cards",
         year,
         monthNumber,
-        dueDayOfMonth: card.dueDayOfMonth ?? null,
+        dueDayOfMonth: derivedDueDay,
         amount: -Math.max(0, monthlyPayments?.byCardId[card.id] ?? 0)
       })
     );

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
 import { buildSmartAlerts } from "@/lib/alerts/engine";
+import { applyAlertStateToAlerts } from "@/lib/alerts/state";
 import {
   normalizeAlertSettings,
   parseDeliveryHours,
@@ -18,6 +19,7 @@ import {
   listLedgerEntries,
   listLoanedOutItems,
   listLineItems,
+  listAlertStates,
   listMonthClosures,
   listMonthlyAdjustments,
   listMonthlyIncomePaydays,
@@ -51,6 +53,7 @@ export async function GET(request: NextRequest) {
       loanedOutItems,
       bankBalance,
       persistedAlertSettings,
+      alertStates,
       monthClosures,
       reconciliations
     ] = await Promise.all([
@@ -65,6 +68,7 @@ export async function GET(request: NextRequest) {
       listLoanedOutItems(uid),
       getBankBalance(uid),
       getAlertSettings(uid),
+      listAlertStates(uid),
       listMonthClosures(uid),
       listReconciliations(uid)
     ]);
@@ -171,7 +175,7 @@ export async function GET(request: NextRequest) {
         }
       : null;
 
-    const alerts = buildSmartAlerts({
+    const computedAlerts = buildSmartAlerts({
       selectedMonth,
       snapshot: normalizedSnapshot,
       cards,
@@ -179,6 +183,11 @@ export async function GET(request: NextRequest) {
       settings: alertSettings,
       projectedClosingByCardId,
       paymentByCardIdForCurrentMonth: currentMonthPayment?.byCardId || {}
+    });
+    const { activeAlerts } = applyAlertStateToAlerts({
+      alerts: computedAlerts,
+      states: alertStates,
+      now: new Date()
     });
 
     return jsonOk({
@@ -199,7 +208,7 @@ export async function GET(request: NextRequest) {
         usingActual: hasActualStatuses
       },
       alertSettings,
-      alerts,
+      alerts: activeAlerts,
       timeline
     });
   });

@@ -1,11 +1,13 @@
 import { createHash } from "crypto";
 
 import { buildSmartAlerts } from "@/lib/alerts/engine";
+import { isWithinQuietHours } from "@/lib/alerts/quiet-hours";
 import {
   normalizeAlertSettings,
   parseDeliveryHours,
   parseReminderOffsets
 } from "@/lib/alerts/settings";
+import { applyAlertStateToAlerts } from "@/lib/alerts/state";
 import { getDatePartsInTimeZone } from "@/lib/cards/due-date";
 import { buildMonthTimeline } from "@/lib/dashboard/timeline";
 import { computeCardMonthProjections, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
@@ -20,6 +22,8 @@ import {
   listMonthlyIncomePaydays,
   listMonthlyPayments,
   listPushSubscriptions,
+  listAlertStates,
+  updatePushSubscription,
   upsertAlertSettings
 } from "@/lib/firestore/repository";
 import {
@@ -43,6 +47,33 @@ export interface SmartAlertDispatchResult {
   reminderOffsets: number[];
   deliveryHoursLocal: number[];
   alerts: Array<Pick<SmartAlert, "id" | "type" | "severity" | "title">>;
+}
+
+function parsePushErrorStatusCode(error: unknown): number | null {
+  if (typeof error !== "object" || error === null || !("statusCode" in error)) {
+    return null;
+  }
+  const raw = Number((error as { statusCode?: unknown }).statusCode);
+  return Number.isFinite(raw) ? raw : null;
+}
+
+function parsePushErrorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message?: unknown }).message || "Push send failed");
+  }
+  return "Push send failed";
+}
+
+async function bestEffortUpdatePushDiagnostics(
+  uid: string,
+  subscriptionId: string,
+  payload: Parameters<typeof updatePushSubscription>[2]
+): Promise<void> {
+  try {
+    await updatePushSubscription(uid, subscriptionId, payload);
+  } catch {
+    // Best effort diagnostics should not fail dispatch flow.
+  }
 }
 
 function monthKeyFromNow(now: Date): string {
@@ -150,7 +181,8 @@ export async function dispatchSmartAlertsForUser(
     myBills,
     adjustments,
     monthlyIncomePaydays,
-    loanedOutItems
+    loanedOutItems,
+    alertStates
   ] = await Promise.all([
     listCardAccounts(uid),
     listPushSubscriptions(uid),
@@ -163,7 +195,8 @@ export async function dispatchSmartAlertsForUser(
     listLineItems(uid, "myBills"),
     listMonthlyAdjustments(uid),
     listMonthlyIncomePaydays(uid),
-    listLoanedOutItems(uid)
+    listLoanedOutItems(uid),
+    listAlertStates(uid)
   ]);
 
   const settings = normalizeAlertSettings(
@@ -200,6 +233,24 @@ export async function dispatchSmartAlertsForUser(
       deliveryHoursLocal: settings.deliveryHoursLocal,
       alerts: []
     };
+  }
+
+  if (options.source === "realtime" || options.source === "cron") {
+    const quiet = isWithinQuietHours(settings, now);
+    if (quiet.quiet) {
+      return {
+        ok: true,
+        source: options.source,
+        sent: 0,
+        failed: 0,
+        deleted: 0,
+        currentMonth,
+        reason: `Skipped by quiet hours (${settings.quietHoursStartLocal}:00-${settings.quietHoursEndLocal}:00 ${quiet.timezone}).`,
+        reminderOffsets: settings.dueReminderOffsets,
+        deliveryHoursLocal: settings.deliveryHoursLocal,
+        alerts: []
+      };
+    }
   }
 
   if (!options.force && options.source === "cron") {
@@ -260,6 +311,11 @@ export async function dispatchSmartAlertsForUser(
     paymentByCardIdForCurrentMonth: currentMonthPayment?.byCardId || {},
     now
   });
+  const { activeAlerts, suppressedAlerts } = applyAlertStateToAlerts({
+    alerts,
+    states: alertStates,
+    now
+  });
 
   if (alerts.length === 0) {
     return {
@@ -270,6 +326,39 @@ export async function dispatchSmartAlertsForUser(
       deleted: 0,
       currentMonth,
       reason: "No smart alerts triggered.",
+      reminderOffsets: settings.dueReminderOffsets,
+      deliveryHoursLocal: settings.deliveryHoursLocal,
+      alerts: []
+    };
+  }
+
+  if (activeAlerts.length === 0) {
+    const suppressedSummary = suppressedAlerts.reduce(
+      (acc, item) => {
+        acc[item.reason] += 1;
+        return acc;
+      },
+      { acknowledged: 0, snoozed: 0, muted: 0 } as Record<"acknowledged" | "snoozed" | "muted", number>
+    );
+    const fragments: string[] = [];
+    if (suppressedSummary.acknowledged > 0) {
+      fragments.push(`${suppressedSummary.acknowledged} acknowledged`);
+    }
+    if (suppressedSummary.snoozed > 0) {
+      fragments.push(`${suppressedSummary.snoozed} snoozed`);
+    }
+    if (suppressedSummary.muted > 0) {
+      fragments.push(`${suppressedSummary.muted} muted`);
+    }
+
+    return {
+      ok: true,
+      source: options.source,
+      sent: 0,
+      failed: 0,
+      deleted: 0,
+      currentMonth,
+      reason: `All alerts are suppressed by state${fragments.length > 0 ? ` (${fragments.join(", ")})` : ""}.`,
       reminderOffsets: settings.dueReminderOffsets,
       deliveryHoursLocal: settings.deliveryHoursLocal,
       alerts: []
@@ -287,7 +376,7 @@ export async function dispatchSmartAlertsForUser(
       reason: "No push subscriptions saved.",
       reminderOffsets: settings.dueReminderOffsets,
       deliveryHoursLocal: settings.deliveryHoursLocal,
-      alerts: alerts.map((alert) => ({
+      alerts: activeAlerts.map((alert) => ({
         id: alert.id,
         type: alert.type,
         severity: alert.severity,
@@ -296,7 +385,7 @@ export async function dispatchSmartAlertsForUser(
     };
   }
 
-  const fingerprint = fingerprintAlerts(alerts, currentMonth);
+  const fingerprint = fingerprintAlerts(activeAlerts, currentMonth);
   if (!options.force && settings.lastPushSentAt) {
     const lastSentAtMs = Date.parse(settings.lastPushSentAt);
     if (Number.isFinite(lastSentAtMs)) {
@@ -313,7 +402,7 @@ export async function dispatchSmartAlertsForUser(
           reason: "Skipped by cooldown window.",
           reminderOffsets: settings.dueReminderOffsets,
           deliveryHoursLocal: settings.deliveryHoursLocal,
-          alerts: alerts.map((alert) => ({
+          alerts: activeAlerts.map((alert) => ({
             id: alert.id,
             type: alert.type,
             severity: alert.severity,
@@ -335,7 +424,7 @@ export async function dispatchSmartAlertsForUser(
       reason: "Skipped duplicate realtime alert set.",
       reminderOffsets: settings.dueReminderOffsets,
       deliveryHoursLocal: settings.deliveryHoursLocal,
-      alerts: alerts.map((alert) => ({
+      alerts: activeAlerts.map((alert) => ({
         id: alert.id,
         type: alert.type,
         severity: alert.severity,
@@ -344,15 +433,15 @@ export async function dispatchSmartAlertsForUser(
     };
   }
 
-  const payload = toSmartAlertPayload(alerts);
+  const payload = toSmartAlertPayload(activeAlerts);
   const nowTag = now.toISOString().slice(0, 10);
   const fullPayload = {
     ...payload,
     tag: `smart-alerts-${currentMonth}-${nowTag}`,
     url: payload.url,
-    badgeCount: alerts.length,
+    badgeCount: activeAlerts.length,
     source: options.source,
-    alerts: alerts.map((alert) => ({
+    alerts: activeAlerts.map((alert) => ({
       id: alert.id,
       type: alert.type,
       severity: alert.severity,
@@ -380,17 +469,44 @@ export async function dispatchSmartAlertsForUser(
           fullPayload
         );
         sent += 1;
+        const successAt = toIsoNow();
+        await bestEffortUpdatePushDiagnostics(uid, subscription.id, {
+          lastSuccessAt: successAt,
+          lastFailureAt: null,
+          lastFailureReason: null,
+          endpointHealth: "healthy",
+          failureCount: 0,
+          updatedAt: successAt
+        });
       } catch (error) {
         failed += 1;
-        const statusCode =
-          typeof error === "object" && error !== null && "statusCode" in error
-            ? Number((error as { statusCode?: unknown }).statusCode)
-            : null;
+        const statusCode = parsePushErrorStatusCode(error);
+        const message = parsePushErrorMessage(error);
+        const failureAt = toIsoNow();
+        const nextFailureCount = (subscription.failureCount ?? 0) + 1;
+        const reason =
+          `${statusCode ?? "error"} ${message}`.trim().slice(0, 240) || "push send failed";
 
         if (statusCode === 404 || statusCode === 410) {
+          await bestEffortUpdatePushDiagnostics(uid, subscription.id, {
+            lastFailureAt: failureAt,
+            lastFailureReason: reason,
+            endpointHealth: "stale",
+            failureCount: nextFailureCount,
+            updatedAt: failureAt
+          });
           await deletePushSubscription(uid, subscription.endpoint);
           deleted += 1;
+          return;
         }
+
+        await bestEffortUpdatePushDiagnostics(uid, subscription.id, {
+          lastFailureAt: failureAt,
+          lastFailureReason: reason,
+          endpointHealth: "degraded",
+          failureCount: nextFailureCount,
+          updatedAt: failureAt
+        });
       }
     })
   );
@@ -414,7 +530,7 @@ export async function dispatchSmartAlertsForUser(
     currentMonth,
     reminderOffsets: settings.dueReminderOffsets,
     deliveryHoursLocal: settings.deliveryHoursLocal,
-    alerts: alerts.map((alert) => ({
+    alerts: activeAlerts.map((alert) => ({
       id: alert.id,
       type: alert.type,
       severity: alert.severity,

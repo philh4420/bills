@@ -1,10 +1,14 @@
 import { AlertSettings } from "@/types";
+import { APP_TIMEZONE } from "@/lib/util/constants";
 
 export const DEFAULT_LOW_MONEY_LEFT_THRESHOLD = 100;
 export const DEFAULT_CARD_UTILIZATION_THRESHOLD = 80;
 export const DEFAULT_DUE_REMINDER_OFFSETS = [7, 3, 1];
 export const DEFAULT_DELIVERY_HOURS_LOCAL = [8];
 export const DEFAULT_PUSH_COOLDOWN_MINUTES = 60;
+export const DEFAULT_QUIET_HOURS_ENABLED = false;
+export const DEFAULT_QUIET_HOURS_START_LOCAL = 22;
+export const DEFAULT_QUIET_HOURS_END_LOCAL = 7;
 
 function toUniqueSorted(values: number[], order: "asc" | "desc"): number[] {
   const unique = Array.from(new Set(values));
@@ -97,6 +101,22 @@ export function normalizeAlertSettings(
     realtimePushEnabled:
       typeof input?.realtimePushEnabled === "boolean" ? input.realtimePushEnabled : true,
     cronPushEnabled: typeof input?.cronPushEnabled === "boolean" ? input.cronPushEnabled : true,
+    quietHoursEnabled:
+      typeof input?.quietHoursEnabled === "boolean"
+        ? input.quietHoursEnabled
+        : DEFAULT_QUIET_HOURS_ENABLED,
+    quietHoursStartLocal:
+      typeof input?.quietHoursStartLocal === "number" && Number.isFinite(input.quietHoursStartLocal)
+        ? Math.max(0, Math.min(23, Math.round(input.quietHoursStartLocal)))
+        : DEFAULT_QUIET_HOURS_START_LOCAL,
+    quietHoursEndLocal:
+      typeof input?.quietHoursEndLocal === "number" && Number.isFinite(input.quietHoursEndLocal)
+        ? Math.max(0, Math.min(23, Math.round(input.quietHoursEndLocal)))
+        : DEFAULT_QUIET_HOURS_END_LOCAL,
+    quietHoursTimezone:
+      typeof input?.quietHoursTimezone === "string" && input.quietHoursTimezone.trim().length > 0
+        ? input.quietHoursTimezone.trim()
+        : APP_TIMEZONE,
     enabledTypes: {
       lowMoneyLeft:
         typeof input?.enabledTypes?.lowMoneyLeft === "boolean" ? input.enabledTypes.lowMoneyLeft : true,

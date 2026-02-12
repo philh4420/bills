@@ -6,6 +6,7 @@ import { getFirebaseAdminFirestore } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import {
   AlertSettings,
+  AlertStateRecord,
   BankBalance,
   CardAccount,
   ImportRecord,
@@ -86,6 +87,20 @@ function normalizeReconciliationStatus(value: unknown): ReconciliationRecord["st
   return "matched";
 }
 
+function normalizeAlertState(input: AlertStateRecord): AlertStateRecord {
+  return {
+    ...input,
+    muted: input.muted === true
+  };
+}
+
+function normalizePushEndpointHealth(value: unknown): PushSubscriptionRecord["endpointHealth"] {
+  if (value === "degraded" || value === "stale") {
+    return value;
+  }
+  return "healthy";
+}
+
 export async function upsertUserProfile(profile: UserProfile): Promise<void> {
   await userDoc(profile.uid).set(stripUndefined(profile), { merge: true });
 }
@@ -95,7 +110,23 @@ export async function listCardAccounts(uid: string): Promise<CardAccount[]> {
   return mapDocs<CardAccount>(snap.docs).map((card) => ({
     ...card,
     interestRateApr: card.interestRateApr ?? 0,
-    dueDayOfMonth: card.dueDayOfMonth ?? null
+    dueDayOfMonth: card.dueDayOfMonth ?? null,
+    statementDay: card.statementDay ?? null,
+    interestFreeDays: card.interestFreeDays ?? null,
+    minimumPaymentRule:
+      card.minimumPaymentRule && typeof card.minimumPaymentRule.value === "number"
+        ? {
+            type: card.minimumPaymentRule.type === "fixed" ? "fixed" : "percent",
+            value: card.minimumPaymentRule.value
+          }
+        : null,
+    lateFeeRule:
+      card.lateFeeRule && typeof card.lateFeeRule.value === "number"
+        ? {
+            type: "fixed",
+            value: card.lateFeeRule.value
+          }
+        : null
   }));
 }
 
@@ -161,7 +192,17 @@ function toPushSubscriptionId(endpoint: string): string {
 
 export async function listPushSubscriptions(uid: string): Promise<PushSubscriptionRecord[]> {
   const snap = await userDoc(uid).collection(COLLECTIONS.pushSubscriptions).get();
-  return mapDocs<PushSubscriptionRecord>(snap.docs);
+  return mapDocs<PushSubscriptionRecord>(snap.docs).map((entry) => ({
+    ...entry,
+    endpointHealth: normalizePushEndpointHealth(entry.endpointHealth),
+    failureCount:
+      typeof entry.failureCount === "number" && Number.isFinite(entry.failureCount)
+        ? Math.max(0, Math.round(entry.failureCount))
+        : 0,
+    lastSuccessAt: entry.lastSuccessAt ?? null,
+    lastFailureAt: entry.lastFailureAt ?? null,
+    lastFailureReason: entry.lastFailureReason ?? null
+  }));
 }
 
 export async function upsertPushSubscription(
@@ -173,6 +214,16 @@ export async function upsertPushSubscription(
     merge: true
   });
   return id;
+}
+
+export async function updatePushSubscription(
+  uid: string,
+  id: string,
+  payload: Partial<Omit<PushSubscriptionRecord, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.pushSubscriptions).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
 }
 
 export async function deletePushSubscription(uid: string, endpoint: string): Promise<void> {
@@ -406,15 +457,49 @@ export async function upsertBankBalance(
 }
 
 export async function getAlertSettings(uid: string): Promise<AlertSettings | null> {
-  const doc = await userDoc(uid).collection(COLLECTIONS.alertSettings).doc("default").get();
-  if (!doc.exists) {
+  const primaryDoc = await userDoc(uid).collection(COLLECTIONS.alertSettings).doc("primary").get();
+  if (primaryDoc.exists) {
+    return primaryDoc.data() as AlertSettings;
+  }
+
+  const legacyDoc = await userDoc(uid).collection(COLLECTIONS.alertSettings).doc("default").get();
+  if (!legacyDoc.exists) {
     return null;
   }
-  return doc.data() as AlertSettings;
+
+  return legacyDoc.data() as AlertSettings;
 }
 
 export async function upsertAlertSettings(uid: string, payload: Partial<AlertSettings>): Promise<void> {
-  await userDoc(uid).collection(COLLECTIONS.alertSettings).doc("default").set(stripUndefined(payload), {
+  await userDoc(uid).collection(COLLECTIONS.alertSettings).doc("primary").set(stripUndefined(payload), {
+    merge: true
+  });
+}
+
+export async function listAlertStates(uid: string): Promise<AlertStateRecord[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.alertStates).get();
+  return mapDocs<AlertStateRecord>(snap.docs).map((record) => normalizeAlertState(record));
+}
+
+export async function getAlertState(uid: string, alertId: string): Promise<AlertStateRecord | null> {
+  const doc = await userDoc(uid).collection(COLLECTIONS.alertStates).doc(alertId).get();
+  if (!doc.exists) {
+    return null;
+  }
+
+  const data = doc.data() as Omit<AlertStateRecord, "id">;
+  return normalizeAlertState({
+    id: doc.id,
+    ...data
+  });
+}
+
+export async function upsertAlertState(
+  uid: string,
+  alertId: string,
+  payload: Partial<Omit<AlertStateRecord, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.alertStates).doc(alertId).set(stripUndefined(payload), {
     merge: true
   });
 }

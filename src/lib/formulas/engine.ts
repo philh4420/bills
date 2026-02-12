@@ -17,7 +17,10 @@ export interface CardMonthProjectionEntry {
   openingBalance: number;
   interestRateApr: number;
   interestAdded: number;
+  statementBalance: number;
   paymentAmount: number;
+  minimumPaymentAmount: number;
+  lateFeeAdded: number;
   closingBalance: number;
 }
 
@@ -26,6 +29,7 @@ export interface CardMonthProjection {
   entries: Record<string, CardMonthProjectionEntry>;
   totalInterestAdded: number;
   totalPaymentAmount: number;
+  totalLateFeeAdded: number;
   totalClosingBalance: number;
 }
 
@@ -77,9 +81,49 @@ export function extendMonthlyPaymentsToYearEnd(
 }
 
 export function computeCardMonthProjections(
-  cards: Array<Pick<CardAccount, "id" | "usedLimit" | "interestRateApr">>,
+  cards: Array<
+    Pick<
+      CardAccount,
+      "id" | "usedLimit" | "interestRateApr" | "minimumPaymentRule" | "lateFeeRule"
+    >
+  >,
   monthlyPayments: Array<Pick<MonthlyCardPayments, "month" | "byCardId">>
 ): CardMonthProjection[] {
+  function computeMinimumPaymentAmount(
+    statementBalance: number,
+    rule: Pick<CardAccount, "minimumPaymentRule">["minimumPaymentRule"]
+  ): number {
+    if (!rule) {
+      return 0;
+    }
+
+    if (!Number.isFinite(statementBalance) || statementBalance <= 0) {
+      return 0;
+    }
+
+    if (rule.type === "fixed") {
+      return normalizeCurrency(Math.min(statementBalance, Math.max(0, rule.value)));
+    }
+
+    return normalizeCurrency(Math.min(statementBalance, statementBalance * (Math.max(0, rule.value) / 100)));
+  }
+
+  function computeLateFee(
+    paymentAmount: number,
+    minimumPaymentAmount: number,
+    rule: Pick<CardAccount, "lateFeeRule">["lateFeeRule"]
+  ): number {
+    if (!rule || minimumPaymentAmount <= 0) {
+      return 0;
+    }
+
+    if (paymentAmount + 0.0001 >= minimumPaymentAmount) {
+      return 0;
+    }
+
+    return normalizeCurrency(Math.max(0, rule.value));
+  }
+
   const balancesByCardId: Record<string, number> = {};
   cards.forEach((card) => {
     balancesByCardId[card.id] = normalizeCurrency(Math.max(0, card.usedLimit || 0));
@@ -92,6 +136,7 @@ export function computeCardMonthProjections(
       const entries: Record<string, CardMonthProjectionEntry> = {};
       let totalInterestAdded = 0;
       let totalPaymentAmount = 0;
+      let totalLateFeeAdded = 0;
       let totalClosingBalance = 0;
 
       cards.forEach((card) => {
@@ -99,21 +144,30 @@ export function computeCardMonthProjections(
         const interestRateApr = normalizeCurrency(Math.max(0, card.interestRateApr || 0));
         const monthlyRate = interestRateApr / 1200;
         const interestAdded = normalizeCurrency(openingBalance * monthlyRate);
+        const statementBalance = normalizeCurrency(openingBalance + interestAdded);
         const paymentAmount = normalizeCurrency(Math.max(0, payment.byCardId[card.id] || 0));
-        const closingBalance = normalizeCurrency(Math.max(0, openingBalance + interestAdded - paymentAmount));
+        const minimumPaymentAmount = computeMinimumPaymentAmount(statementBalance, card.minimumPaymentRule);
+        const lateFeeAdded = computeLateFee(paymentAmount, minimumPaymentAmount, card.lateFeeRule);
+        const closingBalance = normalizeCurrency(
+          Math.max(0, openingBalance + interestAdded + lateFeeAdded - paymentAmount)
+        );
 
         entries[card.id] = {
           cardId: card.id,
           openingBalance,
           interestRateApr,
           interestAdded,
+          statementBalance,
           paymentAmount,
+          minimumPaymentAmount,
+          lateFeeAdded,
           closingBalance
         };
 
         balancesByCardId[card.id] = closingBalance;
         totalInterestAdded = normalizeCurrency(totalInterestAdded + interestAdded);
         totalPaymentAmount = normalizeCurrency(totalPaymentAmount + paymentAmount);
+        totalLateFeeAdded = normalizeCurrency(totalLateFeeAdded + lateFeeAdded);
         totalClosingBalance = normalizeCurrency(totalClosingBalance + closingBalance);
       });
 
@@ -122,6 +176,7 @@ export function computeCardMonthProjections(
         entries,
         totalInterestAdded,
         totalPaymentAmount,
+        totalLateFeeAdded,
         totalClosingBalance
       };
     });

@@ -105,6 +105,10 @@ interface DashboardData {
     cooldownMinutes: number;
     realtimePushEnabled: boolean;
     cronPushEnabled: boolean;
+    quietHoursEnabled: boolean;
+    quietHoursStartLocal: number;
+    quietHoursEndLocal: number;
+    quietHoursTimezone: string;
     enabledTypes: {
       lowMoneyLeft: boolean;
       cardUtilization: boolean;
@@ -243,6 +247,10 @@ export default function DashboardPage() {
     cooldownMinutes: "60",
     realtimePushEnabled: true,
     cronPushEnabled: true,
+    quietHoursEnabled: false,
+    quietHoursStartLocal: "22",
+    quietHoursEndLocal: "7",
+    quietHoursTimezone: "Europe/London",
     lowMoneyLeftEnabled: true,
     cardUtilizationEnabled: true,
     cardDueEnabled: true,
@@ -256,6 +264,7 @@ export default function DashboardPage() {
   const [closureReason, setClosureReason] = useState("");
   const [savingReconciliation, setSavingReconciliation] = useState(false);
   const [savingClosure, setSavingClosure] = useState(false);
+  const [alertActionBusyId, setAlertActionBusyId] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dashboard", month],
@@ -278,6 +287,10 @@ export default function DashboardPage() {
       cooldownMinutes: String(data.alertSettings.cooldownMinutes ?? 60),
       realtimePushEnabled: data.alertSettings.realtimePushEnabled !== false,
       cronPushEnabled: data.alertSettings.cronPushEnabled !== false,
+      quietHoursEnabled: data.alertSettings.quietHoursEnabled === true,
+      quietHoursStartLocal: String(data.alertSettings.quietHoursStartLocal ?? 22),
+      quietHoursEndLocal: String(data.alertSettings.quietHoursEndLocal ?? 7),
+      quietHoursTimezone: data.alertSettings.quietHoursTimezone || "Europe/London",
       lowMoneyLeftEnabled: data.alertSettings.enabledTypes?.lowMoneyLeft !== false,
       cardUtilizationEnabled: data.alertSettings.enabledTypes?.cardUtilization !== false,
       cardDueEnabled: data.alertSettings.enabledTypes?.cardDue !== false,
@@ -356,6 +369,8 @@ export default function DashboardPage() {
     const lowMoneyLeftThreshold = Number.parseFloat(settingsDraft.lowMoneyLeftThreshold);
     const utilizationThresholdPercent = Number.parseFloat(settingsDraft.utilizationThresholdPercent);
     const cooldownMinutes = Number.parseInt(settingsDraft.cooldownMinutes, 10);
+    const quietHoursStartLocal = Number.parseInt(settingsDraft.quietHoursStartLocal, 10);
+    const quietHoursEndLocal = Number.parseInt(settingsDraft.quietHoursEndLocal, 10);
     const dueReminderOffsets = parseIntegerCsv(settingsDraft.dueReminderOffsets, 0, 31, "desc");
     const deliveryHoursLocal = parseIntegerCsv(settingsDraft.deliveryHoursLocal, 0, 23, "asc");
 
@@ -379,6 +394,18 @@ export default function DashboardPage() {
       setSettingsMessage("Delivery hours must include at least one value (0-23).");
       return;
     }
+    if (!Number.isInteger(quietHoursStartLocal) || quietHoursStartLocal < 0 || quietHoursStartLocal > 23) {
+      setSettingsMessage("Quiet hours start must be an hour between 0 and 23.");
+      return;
+    }
+    if (!Number.isInteger(quietHoursEndLocal) || quietHoursEndLocal < 0 || quietHoursEndLocal > 23) {
+      setSettingsMessage("Quiet hours end must be an hour between 0 and 23.");
+      return;
+    }
+    if (!settingsDraft.quietHoursTimezone.trim()) {
+      setSettingsMessage("Quiet hours timezone is required.");
+      return;
+    }
 
     setSavingSettings(true);
     setSettingsMessage(null);
@@ -395,6 +422,10 @@ export default function DashboardPage() {
           cooldownMinutes,
           realtimePushEnabled: settingsDraft.realtimePushEnabled,
           cronPushEnabled: settingsDraft.cronPushEnabled,
+          quietHoursEnabled: settingsDraft.quietHoursEnabled,
+          quietHoursStartLocal,
+          quietHoursEndLocal,
+          quietHoursTimezone: settingsDraft.quietHoursTimezone.trim(),
           enabledTypes: {
             lowMoneyLeft: settingsDraft.lowMoneyLeftEnabled,
             cardUtilization: settingsDraft.cardUtilizationEnabled,
@@ -415,6 +446,56 @@ export default function DashboardPage() {
       setSettingsMessage(formatApiClientError(requestError, "Failed to save alert settings."));
     } finally {
       setSavingSettings(false);
+    }
+  }
+
+  async function acknowledgeAlert(alertId: string) {
+    setAlertActionBusyId(`${alertId}:ack`);
+    setSettingsMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/alerts/${encodeURIComponent(alertId)}/ack`, {
+        method: "POST"
+      });
+      setSettingsMessage("Alert acknowledged.");
+      await refetch();
+    } catch (requestError) {
+      setSettingsMessage(formatApiClientError(requestError, "Failed to acknowledge alert."));
+    } finally {
+      setAlertActionBusyId(null);
+    }
+  }
+
+  async function snoozeAlert(alertId: string, minutes: number) {
+    setAlertActionBusyId(`${alertId}:snooze`);
+    setSettingsMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/alerts/${encodeURIComponent(alertId)}/snooze`, {
+        method: "POST",
+        body: JSON.stringify({ minutes })
+      });
+      setSettingsMessage(`Alert snoozed for ${minutes} minute(s).`);
+      await refetch();
+    } catch (requestError) {
+      setSettingsMessage(formatApiClientError(requestError, "Failed to snooze alert."));
+    } finally {
+      setAlertActionBusyId(null);
+    }
+  }
+
+  async function muteAlert(alertId: string) {
+    setAlertActionBusyId(`${alertId}:mute`);
+    setSettingsMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/alerts/${encodeURIComponent(alertId)}/mute`, {
+        method: "POST",
+        body: JSON.stringify({ muted: true })
+      });
+      setSettingsMessage("Alert muted.");
+      await refetch();
+    } catch (requestError) {
+      setSettingsMessage(formatApiClientError(requestError, "Failed to mute alert."));
+    } finally {
+      setAlertActionBusyId(null);
     }
   }
 
@@ -571,6 +652,12 @@ export default function DashboardPage() {
                 Delivery hours (UK):{" "}
                 {(data?.alertSettings?.deliveryHoursLocal || []).map((hour) => `${hour}:00`).join(", ") || "8:00"}
               </p>
+              <p>
+                Quiet hours:{" "}
+                {data?.alertSettings?.quietHoursEnabled
+                  ? `${data?.alertSettings?.quietHoursStartLocal}:00-${data?.alertSettings?.quietHoursEndLocal}:00 (${data?.alertSettings?.quietHoursTimezone || "Europe/London"})`
+                  : "Off"}
+              </p>
             </div>
           }
         >
@@ -680,6 +767,71 @@ export default function DashboardPage() {
               </label>
             </div>
             <div className="panel p-3">
+              <p className="label">Quiet hours</p>
+              <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.quietHoursEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      quietHoursEnabled: event.target.checked
+                    }))
+                  }
+                />
+                Suppress realtime + cron push during quiet hours
+              </label>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <label className="block">
+                  <span className="label">Start hour (0-23)</span>
+                  <input
+                    className="input mt-1"
+                    type="number"
+                    min={0}
+                    max={23}
+                    step={1}
+                    value={settingsDraft.quietHoursStartLocal}
+                    onChange={(event) =>
+                      setSettingsDraft((prev) => ({
+                        ...prev,
+                        quietHoursStartLocal: event.target.value
+                      }))
+                    }
+                  />
+                </label>
+                <label className="block">
+                  <span className="label">End hour (0-23)</span>
+                  <input
+                    className="input mt-1"
+                    type="number"
+                    min={0}
+                    max={23}
+                    step={1}
+                    value={settingsDraft.quietHoursEndLocal}
+                    onChange={(event) =>
+                      setSettingsDraft((prev) => ({
+                        ...prev,
+                        quietHoursEndLocal: event.target.value
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <label className="mt-3 block">
+                <span className="label">Timezone</span>
+                <input
+                  className="input mt-1"
+                  value={settingsDraft.quietHoursTimezone}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) => ({
+                      ...prev,
+                      quietHoursTimezone: event.target.value
+                    }))
+                  }
+                />
+              </label>
+            </div>
+            <div className="panel p-3">
               <p className="label">Alert types</p>
               <label className="mt-2 flex items-center gap-2 text-sm text-[var(--ink-main)]">
                 <input
@@ -752,15 +904,41 @@ export default function DashboardPage() {
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {data?.alerts.map((alert) => (
                 <div className="panel p-4" key={alert.id}>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-semibold text-[var(--ink-main)]">{alert.title}</p>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${severityClass(alert.severity)}`}>
-                      {alert.severity}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm text-[var(--ink-soft)]">{alert.message}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-[var(--ink-main)]">{alert.title}</p>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${severityClass(alert.severity)}`}>
+                    {alert.severity}
+                  </span>
                 </div>
-              ))}
+                <p className="mt-2 text-sm text-[var(--ink-soft)]">{alert.message}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    disabled={alertActionBusyId === `${alert.id}:ack`}
+                    onClick={() => acknowledgeAlert(alert.id)}
+                  >
+                    {alertActionBusyId === `${alert.id}:ack` ? "..." : "Acknowledge"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    disabled={alertActionBusyId === `${alert.id}:snooze`}
+                    onClick={() => snoozeAlert(alert.id, 24 * 60)}
+                  >
+                    {alertActionBusyId === `${alert.id}:snooze` ? "..." : "Snooze 24h"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-danger"
+                    disabled={alertActionBusyId === `${alert.id}:mute`}
+                    onClick={() => muteAlert(alert.id)}
+                  >
+                    {alertActionBusyId === `${alert.id}:mute` ? "..." : "Mute"}
+                  </button>
+                </div>
+              </div>
+            ))}
             </div>
           ) : (
             <p className="mt-3 text-sm text-[var(--ink-soft)]">No active alerts for the current settings.</p>
