@@ -57,7 +57,7 @@ npx web-push generate-vapid-keys
 - optional `CARD_REMINDER_DELIVERY_HOURS` (default `8`, UK local hour)
 
 3. Keep `vercel.json` cron enabled:
-- `GET /api/cron/card-reminders` runs hourly at `0 * * * *`.
+- `GET /api/cron/card-reminders` runs daily at `0 8 * * *` (UTC).
 - On Hobby plan this is valid for free use.
 
 4. In the app:
