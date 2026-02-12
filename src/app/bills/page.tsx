@@ -49,10 +49,36 @@ interface IncomePaydaysData {
     id: string;
     name: string;
     amount: number;
-    defaultPayDay: number;
+    defaultPayDays: number[];
+    modeSource: "payday-mode" | "line-item-default";
   }>;
   byIncomeId: Record<string, number[]>;
   hasOverrides: boolean;
+  paydayMode: {
+    enabled: boolean;
+    anchorDate: string;
+    cycleDays: number;
+    incomeIds: string[];
+  };
+}
+
+interface PaydayModeSettings {
+  id?: string;
+  enabled: boolean;
+  anchorDate: string;
+  cycleDays: number;
+  incomeIds: string[];
+}
+
+interface SavingsGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  monthlyContribution: number;
+  startMonth: string;
+  targetMonth?: string;
+  status: "active" | "paused" | "completed";
 }
 
 const DUE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
@@ -78,6 +104,16 @@ function formatIncomeSourceLabel(sourceType?: "loan" | "bonus" | "other"): strin
 
 function formatLoanStatusLabel(status: "outstanding" | "paidBack"): string {
   return status === "paidBack" ? "Paid back" : "Outstanding";
+}
+
+function formatSavingsStatusLabel(status: "active" | "paused" | "completed"): string {
+  if (status === "paused") {
+    return "Paused";
+  }
+  if (status === "completed") {
+    return "Completed";
+  }
+  return "Active";
 }
 
 function parseDueDayInput(value: string): number | null {
@@ -599,6 +635,179 @@ function LineItemCollection({
   );
 }
 
+function PaydayModeSection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
+  const [draft, setDraft] = useState<PaydayModeSettings>({
+    enabled: false,
+    anchorDate: "",
+    cycleDays: 28,
+    incomeIds: []
+  });
+  const [useAllIncomes, setUseAllIncomes] = useState(true);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const settingsQuery = useQuery({
+    queryKey: ["payday-mode"],
+    queryFn: () => authedRequest<{ settings: PaydayModeSettings }>(getIdToken, "/api/payday-mode")
+  });
+  const incomeQuery = useQuery({
+    queryKey: ["/api/income"],
+    queryFn: () => authedRequest<{ items: Item[] }>(getIdToken, "/api/income")
+  });
+
+  useEffect(() => {
+    if (!settingsQuery.data?.settings) {
+      return;
+    }
+    const settings = settingsQuery.data.settings;
+    const scopedIncomeIds = settings.incomeIds || [];
+    setDraft({
+      enabled: settings.enabled === true,
+      anchorDate: settings.anchorDate || "",
+      cycleDays: settings.cycleDays || 28,
+      incomeIds: scopedIncomeIds
+    });
+    setUseAllIncomes(scopedIncomeIds.length === 0);
+  }, [settingsQuery.data?.settings]);
+
+  const incomes = incomeQuery.data?.items || [];
+
+  function toggleIncomeId(incomeId: string, enabled: boolean) {
+    setDraft((prev) => {
+      const nextIds = new Set(prev.incomeIds || []);
+      if (enabled) {
+        nextIds.add(incomeId);
+      } else {
+        nextIds.delete(incomeId);
+      }
+      return {
+        ...prev,
+        incomeIds: Array.from(nextIds)
+      };
+    });
+  }
+
+  async function save() {
+    if (!draft.anchorDate) {
+      setMessage("Anchor pay date is required.");
+      return;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, "/api/payday-mode", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: draft.enabled,
+          anchorDate: draft.anchorDate,
+          cycleDays: draft.cycleDays,
+          incomeIds: useAllIncomes ? [] : draft.incomeIds
+        })
+      });
+      setMessage("Saved payday mode.");
+      await settingsQuery.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to save payday mode."));
+    }
+  }
+
+  return (
+    <SectionPanel
+      title="Payday Mode (4-week cycle)"
+      subtitle="Automatically shift pay dates every 28 days by month. Monthly overrides still take priority."
+      right={
+        <div className="text-sm text-[var(--ink-soft)]">
+          <p>Status: {draft.enabled ? "Enabled" : "Disabled"}</p>
+          <p>Cycle: Every {draft.cycleDays} days</p>
+        </div>
+      }
+    >
+      {settingsQuery.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
+      {settingsQuery.error ? <p className="text-sm text-red-700">{(settingsQuery.error as Error).message}</p> : null}
+
+      <div className="grid gap-3 xl:grid-cols-[220px_220px_minmax(0,1fr)_auto] xl:items-end">
+        <label className="block">
+          <span className="label">Enable mode</span>
+          <select
+            className="input mt-1"
+            value={draft.enabled ? "on" : "off"}
+            onChange={(event) =>
+              setDraft((prev) => ({
+                ...prev,
+                enabled: event.target.value === "on"
+              }))
+            }
+          >
+            <option value="off">Off</option>
+            <option value="on">On</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="label">Anchor pay date</span>
+          <input
+            className="input mt-1"
+            type="date"
+            value={draft.anchorDate}
+            onChange={(event) =>
+              setDraft((prev) => ({
+                ...prev,
+                anchorDate: event.target.value
+              }))
+            }
+          />
+        </label>
+
+        <div className="panel p-3">
+          <label className="flex items-center gap-2 text-sm text-[var(--ink-main)]">
+            <input
+              type="checkbox"
+              checked={useAllIncomes}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setUseAllIncomes(checked);
+                if (!checked && incomes.length > 0) {
+                  setDraft((prev) => ({
+                    ...prev,
+                    incomeIds: incomes.map((income) => income.id)
+                  }));
+                }
+              }}
+            />
+            Apply to all income lines
+          </label>
+
+          {!useAllIncomes ? (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {incomes.map((income) => {
+                const checked = (draft.incomeIds || []).includes(income.id);
+                return (
+                  <label key={`payday-income-${income.id}`} className="flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => toggleIncomeId(income.id, event.target.checked)}
+                    />
+                    {income.name}
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+
+        <button className="button-primary w-full xl:w-auto" type="button" onClick={() => save()}>
+          Save mode
+        </button>
+      </div>
+
+      <p className="mt-2 text-xs text-[var(--ink-soft)]">
+        Keep cycle at 28 days for four-week pay. The anchor date should be a real payday.
+      </p>
+      {message ? <p className="mt-2 text-sm text-[var(--accent-strong)]">{message}</p> : null}
+    </SectionPanel>
+  );
+}
+
 function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
   const [month, setMonth] = useState<string>("");
   const [draftTextByIncomeId, setDraftTextByIncomeId] = useState<Record<string, string>>({});
@@ -639,8 +848,8 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
       : [];
   const customCount = incomes.reduce((acc, income) => {
     const parsed = parsePaydayListInput(draftTextByIncomeId[income.id] || "");
-    const currentDays = parsed && parsed.length > 0 ? parsed : [income.defaultPayDay];
-    return acc + (dayListsEqual(currentDays, [income.defaultPayDay]) ? 0 : 1);
+    const currentDays = parsed && parsed.length > 0 ? parsed : income.defaultPayDays;
+    return acc + (dayListsEqual(currentDays, income.defaultPayDays) ? 0 : 1);
   }, 0);
 
   async function saveMonthPaydays() {
@@ -656,7 +865,7 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
         return;
       }
 
-      payload[income.id] = dayListsEqual(parsed, [income.defaultPayDay]) ? null : parsed;
+      payload[income.id] = dayListsEqual(parsed, income.defaultPayDays) ? null : parsed;
     }
 
     setMessage(null);
@@ -700,7 +909,7 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
 
       <div className="space-y-3 xl:hidden">
         {incomes.map((income) => {
-          const payDayText = draftTextByIncomeId[income.id] || String(income.defaultPayDay);
+          const payDayText = draftTextByIncomeId[income.id] || formatPaydayList(income.defaultPayDays);
           return (
             <div className="mobile-edit-card" key={`income-payday-mobile-${income.id}`}>
               <div className="mobile-edit-card-head">
@@ -720,9 +929,11 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
                       [income.id]: event.target.value
                     }))
                   }
-                  placeholder={`e.g. ${income.defaultPayDay} or 2, 30`}
+                  placeholder={`e.g. ${formatPaydayList(income.defaultPayDays)} or 2, 30`}
                 />
-                <p className="mt-1 text-xs text-[var(--ink-soft)]">Default: {income.defaultPayDay}</p>
+                <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                  Default: {formatPaydayList(income.defaultPayDays)} ({income.modeSource === "payday-mode" ? "Payday mode" : "Income pay day"})
+                </p>
               </div>
             </div>
           );
@@ -741,7 +952,7 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
           </thead>
           <tbody>
             {incomes.map((income) => {
-              const payDayText = draftTextByIncomeId[income.id] || String(income.defaultPayDay);
+              const payDayText = draftTextByIncomeId[income.id] || formatPaydayList(income.defaultPayDays);
               return (
                 <tr key={`income-payday-row-${income.id}`}>
                   <td>{income.name}</td>
@@ -756,10 +967,15 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
                           [income.id]: event.target.value
                         }))
                       }
-                      placeholder={`e.g. ${income.defaultPayDay} or 2, 30`}
+                      placeholder={`e.g. ${formatPaydayList(income.defaultPayDays)} or 2, 30`}
                     />
                   </td>
-                  <td>{income.defaultPayDay}</td>
+                  <td>
+                    {formatPaydayList(income.defaultPayDays)}
+                    <div className="text-xs text-[var(--ink-soft)]">
+                      {income.modeSource === "payday-mode" ? "Payday mode" : "Income pay day"}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
@@ -770,6 +986,12 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
       <p className="mt-2 text-sm text-[var(--ink-soft)]">
         Custom month overrides: {customCount}
       </p>
+      {query.data?.paydayMode?.enabled ? (
+        <p className="mt-1 text-xs text-[var(--ink-soft)]">
+          Payday mode default: every {query.data.paydayMode.cycleDays} days from{" "}
+          {query.data.paydayMode.anchorDate || "anchor date"}.
+        </p>
+      ) : null}
       <p className="mt-1 text-xs text-[var(--ink-soft)]">
         Enter one or more pay days (1-31), comma-separated. Example: <code>2, 30</code>.
       </p>
@@ -1368,6 +1590,499 @@ function ExtraIncomeCollection({ getIdToken }: { getIdToken: () => Promise<strin
               </td>
               <td>
                 <button className="button-primary" type="button" onClick={() => createItem()}>
+                  Add
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {message ? <p className="mt-2 text-sm text-[var(--accent-strong)]">{message}</p> : null}
+    </SectionPanel>
+  );
+}
+
+function SavingsGoalsCollection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
+  const [message, setMessage] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, SavingsGoal>>({});
+  const [newItem, setNewItem] = useState({
+    name: "",
+    targetAmount: "1000",
+    currentAmount: "0",
+    monthlyContribution: "100",
+    startMonth: "2026-01",
+    targetMonth: "",
+    status: "active" as "active" | "paused" | "completed"
+  });
+
+  const query = useQuery({
+    queryKey: ["savings-goals"],
+    queryFn: () => authedRequest<{ goals: SavingsGoal[] }>(getIdToken, "/api/savings-goals")
+  });
+
+  useEffect(() => {
+    const next: Record<string, SavingsGoal> = {};
+    (query.data?.goals || []).forEach((goal) => {
+      next[goal.id] = {
+        ...goal,
+        targetMonth: goal.targetMonth || undefined
+      };
+    });
+    setDrafts(next);
+  }, [query.data]);
+
+  const goals = query.data?.goals || [];
+  const monthlyTarget = goals
+    .filter((goal) => goal.status === "active")
+    .reduce((acc, goal) => acc + goal.monthlyContribution, 0);
+
+  function getDraft(goal: SavingsGoal): SavingsGoal {
+    return drafts[goal.id] || { ...goal, targetMonth: goal.targetMonth || undefined };
+  }
+
+  async function createGoal() {
+    if (!newItem.name.trim()) {
+      setMessage("Name is required.");
+      return;
+    }
+
+    const startMonth = normalizeMonthInput(newItem.startMonth);
+    if (!startMonth) {
+      setMessage("Start month must be in YYYY-MM format.");
+      return;
+    }
+    const targetMonth = newItem.targetMonth ? normalizeMonthInput(newItem.targetMonth) : null;
+    if (newItem.targetMonth && !targetMonth) {
+      setMessage("Target month must be in YYYY-MM format.");
+      return;
+    }
+    if (targetMonth && targetMonth < startMonth) {
+      setMessage("Target month must be greater than or equal to start month.");
+      return;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, "/api/savings-goals", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newItem.name.trim(),
+          targetAmount: Number(newItem.targetAmount),
+          currentAmount: Number(newItem.currentAmount),
+          monthlyContribution: Number(newItem.monthlyContribution),
+          startMonth,
+          targetMonth: targetMonth || undefined,
+          status: newItem.status
+        })
+      });
+      setNewItem({
+        name: "",
+        targetAmount: "1000",
+        currentAmount: "0",
+        monthlyContribution: "100",
+        startMonth: startMonth,
+        targetMonth: "",
+        status: "active"
+      });
+      setMessage("Created savings goal.");
+      await query.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to create savings goal."));
+    }
+  }
+
+  async function saveGoal(goalId: string) {
+    const draft = drafts[goalId];
+    if (!draft) {
+      return;
+    }
+
+    if (!draft.name.trim()) {
+      setMessage("Name is required.");
+      return;
+    }
+
+    const startMonth = normalizeMonthInput(draft.startMonth);
+    if (!startMonth) {
+      setMessage("Start month must be in YYYY-MM format.");
+      return;
+    }
+    const targetMonth = draft.targetMonth ? normalizeMonthInput(draft.targetMonth) : null;
+    if (draft.targetMonth && !targetMonth) {
+      setMessage("Target month must be in YYYY-MM format.");
+      return;
+    }
+    if (targetMonth && targetMonth < startMonth) {
+      setMessage("Target month must be greater than or equal to start month.");
+      return;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/savings-goals/${goalId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: draft.name.trim(),
+          targetAmount: Number(draft.targetAmount),
+          currentAmount: Number(draft.currentAmount),
+          monthlyContribution: Number(draft.monthlyContribution),
+          startMonth,
+          targetMonth: targetMonth || null,
+          status: draft.status
+        })
+      });
+      setMessage("Saved goal.");
+      await query.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to save goal."));
+    }
+  }
+
+  async function removeGoal(goalId: string) {
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/savings-goals/${goalId}`, {
+        method: "DELETE"
+      });
+      setMessage("Deleted goal.");
+      await query.refetch();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to delete goal."));
+    }
+  }
+
+  return (
+    <SectionPanel
+      title="Savings Goals"
+      subtitle="Set sinking funds with target amount and monthly contribution."
+      right={<p className="text-sm text-[var(--ink-soft)]">Active monthly target: {formatGBP(monthlyTarget)}</p>}
+    >
+      {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
+      {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
+
+      <div className="space-y-3 xl:hidden">
+        {goals.map((goal) => {
+          const draft = getDraft(goal);
+          return (
+            <div className="mobile-edit-card" key={`savings-mobile-${goal.id}`}>
+              <div className="mobile-edit-card-head">
+                <div className="min-w-0">
+                  <p className="mobile-edit-card-title">{goal.name}</p>
+                  <p className="mobile-edit-card-subtitle">
+                    {formatSavingsStatusLabel(goal.status)} · Monthly {formatGBP(goal.monthlyContribution)}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2">
+                <input
+                  className="input"
+                  value={draft.name}
+                  onChange={(event) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [goal.id]: { ...draft, name: event.target.value }
+                    }))
+                  }
+                  placeholder="Goal name"
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={draft.targetAmount}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [goal.id]: { ...draft, targetAmount: Number(event.target.value) }
+                      }))
+                    }
+                    placeholder="Target amount"
+                  />
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={draft.currentAmount}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [goal.id]: { ...draft, currentAmount: Number(event.target.value) }
+                      }))
+                    }
+                    placeholder="Current amount"
+                  />
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={draft.monthlyContribution}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [goal.id]: { ...draft, monthlyContribution: Number(event.target.value) }
+                      }))
+                    }
+                    placeholder="Monthly contribution"
+                  />
+                  <select
+                    className="input"
+                    value={draft.status}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [goal.id]: {
+                          ...draft,
+                          status: event.target.value as SavingsGoal["status"]
+                        }
+                      }))
+                    }
+                  >
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    className="input"
+                    type="month"
+                    value={draft.startMonth}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [goal.id]: { ...draft, startMonth: event.target.value }
+                      }))
+                    }
+                  />
+                  <input
+                    className="input"
+                    type="month"
+                    value={draft.targetMonth || ""}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [goal.id]: { ...draft, targetMonth: event.target.value || undefined }
+                      }))
+                    }
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button className="button-secondary" type="button" onClick={() => saveGoal(goal.id)}>
+                    Save
+                  </button>
+                  <button className="button-danger" type="button" onClick={() => removeGoal(goal.id)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="table-wrap hidden xl:block">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Target</th>
+              <th>Current</th>
+              <th>Monthly</th>
+              <th>Start</th>
+              <th>Target Month</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {goals.map((goal) => {
+              const draft = getDraft(goal);
+              return (
+                <tr key={`savings-row-${goal.id}`}>
+                  <td>
+                    <input
+                      className="input"
+                      value={draft.name}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [goal.id]: { ...draft, name: event.target.value }
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="number"
+                      step="0.01"
+                      value={draft.targetAmount}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [goal.id]: { ...draft, targetAmount: Number(event.target.value) }
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="number"
+                      step="0.01"
+                      value={draft.currentAmount}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [goal.id]: { ...draft, currentAmount: Number(event.target.value) }
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="number"
+                      step="0.01"
+                      value={draft.monthlyContribution}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [goal.id]: { ...draft, monthlyContribution: Number(event.target.value) }
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="month"
+                      value={draft.startMonth}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [goal.id]: { ...draft, startMonth: event.target.value }
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="month"
+                      value={draft.targetMonth || ""}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [goal.id]: { ...draft, targetMonth: event.target.value || undefined }
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <select
+                      className="input"
+                      value={draft.status}
+                      onChange={(event) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [goal.id]: { ...draft, status: event.target.value as SavingsGoal["status"] }
+                        }))
+                      }
+                    >
+                      <option value="active">Active</option>
+                      <option value="paused">Paused</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <div className="flex gap-2">
+                      <button className="button-secondary" type="button" onClick={() => saveGoal(goal.id)}>
+                        Save
+                      </button>
+                      <button className="button-danger" type="button" onClick={() => removeGoal(goal.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+
+            <tr>
+              <td>
+                <input
+                  className="input"
+                  placeholder="New goal"
+                  value={newItem.name}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={newItem.targetAmount}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, targetAmount: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={newItem.currentAmount}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, currentAmount: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={newItem.monthlyContribution}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, monthlyContribution: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="month"
+                  value={newItem.startMonth}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, startMonth: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="month"
+                  value={newItem.targetMonth}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, targetMonth: event.target.value }))}
+                />
+              </td>
+              <td>
+                <select
+                  className="input"
+                  value={newItem.status}
+                  onChange={(event) =>
+                    setNewItem((prev) => ({
+                      ...prev,
+                      status: event.target.value as SavingsGoal["status"]
+                    }))
+                  }
+                >
+                  <option value="active">Active</option>
+                  <option value="paused">Paused</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </td>
+              <td>
+                <button className="button-primary" type="button" onClick={() => createGoal()}>
                   Add
                 </button>
               </td>
@@ -2758,7 +3473,9 @@ export default function BillsPage() {
           endpoint="/api/income"
           getIdToken={getIdToken}
         />
+        <PaydayModeSection getIdToken={getIdToken} />
         <MonthlyIncomePaydaysCollection getIdToken={getIdToken} />
+        <SavingsGoalsCollection getIdToken={getIdToken} />
         <BankBalanceSection getIdToken={getIdToken} />
         <ExtraIncomeCollection getIdToken={getIdToken} />
         <LoanedOutCollection getIdToken={getIdToken} />

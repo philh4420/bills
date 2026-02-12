@@ -92,6 +92,32 @@ export const monthlyIncomePaydaysPutSchema = z.object({
   )
 });
 
+export const paydayModePutSchema = z.object({
+  enabled: z.boolean(),
+  anchorDate: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, "anchorDate must be YYYY-MM-DD"),
+  cycleDays: z.number().int().min(7).max(35).default(28),
+  incomeIds: z.array(z.string().trim().min(1)).optional()
+}).superRefine((value, ctx) => {
+  const [yearRaw, monthRaw, dayRaw] = value.anchorDate.split("-");
+  const year = Number.parseInt(yearRaw || "", 10);
+  const month = Number.parseInt(monthRaw || "", 10);
+  const day = Number.parseInt(dayRaw || "", 10);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["anchorDate"],
+      message: "anchorDate must be a valid calendar date"
+    });
+  }
+});
+
 export const adjustmentCategorySchema = z.enum(["income", "houseBills", "shopping", "myBills"]);
 export const incomeSourceTypeSchema = z.enum(["loan", "bonus", "other"]);
 
@@ -193,6 +219,45 @@ export const loanedOutPatchSchema = z
 
 export const bankBalancePutSchema = z.object({
   amount: z.number()
+});
+
+export const savingsGoalStatusSchema = z.enum(["active", "paused", "completed"]);
+
+export const savingsGoalCreateSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    targetAmount: z.number().positive(),
+    currentAmount: z.number().nonnegative().default(0),
+    monthlyContribution: z.number().nonnegative(),
+    startMonth: monthKeySchema,
+    targetMonth: monthKeySchema.optional(),
+    status: savingsGoalStatusSchema.default("active")
+  })
+  .superRefine((value, ctx) => {
+    if (value.targetMonth && value.targetMonth < value.startMonth) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targetMonth"],
+        message: "targetMonth must be greater than or equal to startMonth"
+      });
+    }
+    if (value.currentAmount > value.targetAmount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["currentAmount"],
+        message: "currentAmount cannot be greater than targetAmount"
+      });
+    }
+  });
+
+export const savingsGoalPatchSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  targetAmount: z.number().positive().optional(),
+  currentAmount: z.number().nonnegative().optional(),
+  monthlyContribution: z.number().nonnegative().optional(),
+  startMonth: monthKeySchema.optional(),
+  targetMonth: monthKeySchema.nullable().optional(),
+  status: savingsGoalStatusSchema.optional()
 });
 
 export const monthClosurePutSchema = z.object({

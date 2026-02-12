@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -130,6 +131,78 @@ interface DashboardData {
   timeline: {
     month: string;
     events: TimelineEvent[];
+  };
+  planning?: {
+    paydayMode: {
+      enabled: boolean;
+      anchorDate: string;
+      cycleDays: number;
+      incomeIds: string[];
+      monthPaydaysByIncomeId: Record<string, number[]>;
+    };
+    savings: {
+      selectedMonth: string;
+      monthlyTargetTotal: number;
+      projectedMoneyLeftAfterSavings: number;
+      atRiskGoalIds: string[];
+      goals: Array<{
+        id: string;
+        name: string;
+        status: "active" | "paused" | "completed";
+        targetAmount: number;
+        currentAmount: number;
+        monthlyContribution: number;
+        startMonth: string;
+        targetMonth?: string;
+        projectedCompletionMonth?: string | null;
+        remainingAmount: number;
+        monthContribution: number;
+      }>;
+    };
+    debtPayoff: {
+      totalDebt: number;
+      monthlyBudget: number;
+      byStrategy: {
+        snowball: {
+          strategy: "snowball" | "avalanche";
+          monthsToDebtFree: number | null;
+          totalInterest: number;
+          payoffOrder: string[];
+        };
+        avalanche: {
+          strategy: "snowball" | "avalanche";
+          monthsToDebtFree: number | null;
+          totalInterest: number;
+          payoffOrder: string[];
+        };
+      };
+    };
+    netWorth: {
+      month: string;
+      assets: number;
+      liabilities: number;
+      loanedOutRecoverable: number;
+      netWorth: number;
+      monthDelta: number;
+    };
+    analytics: {
+      month: string;
+      previousMonth?: string;
+      deltas: Array<{
+        key: string;
+        label: string;
+        currentValue: number;
+        previousValue: number;
+        delta: number;
+        deltaPercent: number | null;
+      }>;
+      driftAlerts: Array<{
+        key: string;
+        label: string;
+        delta: number;
+        deltaPercent: number;
+      }>;
+    };
   };
 }
 
@@ -639,6 +712,96 @@ export default function DashboardPage() {
             </div>
           ) : (
             !isLoading && <p className="text-sm text-[var(--ink-soft)]">No snapshot data yet. Import workbook first.</p>
+          )}
+        </SectionPanel>
+
+        <SectionPanel
+          title="Planning Core (v1.1)"
+          subtitle="Payday mode, savings targets, debt payoff modeling, net worth, and drift analytics (read-only)."
+          right={
+            <Link className="button-secondary inline-block text-sm" href="/net-worth">
+              Open Net Worth
+            </Link>
+          }
+        >
+          {data?.planning ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <Metric
+                  label="Payday Mode"
+                  value={data.planning.paydayMode.enabled ? `Every ${data.planning.paydayMode.cycleDays} days` : "Off"}
+                />
+                <Metric
+                  label="Savings Target (Month)"
+                  value={formatGBP(data.planning.savings.monthlyTargetTotal)}
+                />
+                <Metric
+                  label="Money Left After Savings"
+                  value={formatGBP(data.planning.savings.projectedMoneyLeftAfterSavings)}
+                />
+                <Metric label="Total Debt" value={formatGBP(data.planning.debtPayoff.totalDebt)} />
+                <Metric label="Debt Budget" value={formatGBP(data.planning.debtPayoff.monthlyBudget)} />
+                <Metric label="Net Worth" value={formatGBP(data.planning.netWorth.netWorth)} />
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="panel p-4">
+                  <p className="label">Debt Payoff Comparison</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-[var(--ring)] bg-white/70 p-3">
+                      <p className="text-sm font-semibold text-[var(--ink-main)]">Snowball</p>
+                      <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                        Debt-free:{" "}
+                        {data.planning.debtPayoff.byStrategy.snowball.monthsToDebtFree === null
+                          ? "Not reached"
+                          : `${data.planning.debtPayoff.byStrategy.snowball.monthsToDebtFree} months`}
+                      </p>
+                      <p className="text-sm text-[var(--ink-soft)]">
+                        Interest: {formatGBP(data.planning.debtPayoff.byStrategy.snowball.totalInterest)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-[var(--ring)] bg-white/70 p-3">
+                      <p className="text-sm font-semibold text-[var(--ink-main)]">Avalanche</p>
+                      <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                        Debt-free:{" "}
+                        {data.planning.debtPayoff.byStrategy.avalanche.monthsToDebtFree === null
+                          ? "Not reached"
+                          : `${data.planning.debtPayoff.byStrategy.avalanche.monthsToDebtFree} months`}
+                      </p>
+                      <p className="text-sm text-[var(--ink-soft)]">
+                        Interest: {formatGBP(data.planning.debtPayoff.byStrategy.avalanche.totalInterest)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="panel p-4">
+                  <p className="label">Category Drift Alerts</p>
+                  {data.planning.analytics.driftAlerts.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {data.planning.analytics.driftAlerts.map((alert) => (
+                        <div
+                          key={`drift-alert-${alert.key}`}
+                          className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                        >
+                          <p className="font-semibold">{alert.label}</p>
+                          <p>
+                            {formatGBP(alert.delta)} ({alert.deltaPercent > 0 ? "+" : ""}
+                            {alert.deltaPercent.toFixed(1)}%)
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-[var(--ink-soft)]">
+                      No material month-over-month drift above alert thresholds.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--ink-soft)]">Planning insights will appear after monthly data loads.</p>
           )}
         </SectionPanel>
 

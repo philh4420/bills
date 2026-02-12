@@ -201,6 +201,10 @@ export function validateBackupSnapshot(input: unknown): {
   if (collectionsRoot) {
     getRestorableCollectionKeys().forEach((key) => {
       const value = collectionsRoot[key];
+      if (value === undefined) {
+        collections[key] = [];
+        return;
+      }
       if (!Array.isArray(value)) {
         errors.push(`snapshot.collections.${key} must be an array`);
         collections[key] = [];

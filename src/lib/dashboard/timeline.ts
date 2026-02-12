@@ -1,4 +1,5 @@
 import { daysInMonth } from "@/lib/cards/due-date";
+import { resolveIncomePaydaysForMonth } from "@/lib/payday/mode";
 import { normalizeCurrency } from "@/lib/util/numbers";
 import {
   CardAccount,
@@ -7,7 +8,8 @@ import {
   MonthTimeline,
   MonthTimelineEvent,
   MonthlyAdjustment,
-  MonthlyCardPayments
+  MonthlyCardPayments,
+  PaydayModeSettings
 } from "@/types";
 
 function parseMonthKey(month: string): { year: number; monthNumber: number } {
@@ -72,6 +74,7 @@ export function buildMonthTimeline(params: {
   monthlyPayments: Pick<MonthlyCardPayments, "byCardId"> | null;
   income: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
   incomePaydayOverridesByIncomeId: Record<string, number[]>;
+  paydayModeSettings?: Pick<PaydayModeSettings, "enabled" | "anchorDate" | "cycleDays" | "incomeIds"> | null;
   houseBills: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
   shopping: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
   myBills: Array<Pick<LineItem, "id" | "name" | "amount" | "dueDayOfMonth">>;
@@ -86,6 +89,7 @@ export function buildMonthTimeline(params: {
     monthlyPayments,
     income,
     incomePaydayOverridesByIncomeId,
+    paydayModeSettings,
     houseBills,
     shopping,
     myBills,
@@ -117,9 +121,15 @@ export function buildMonthTimeline(params: {
     );
   });
 
+  const paydaysByIncomeId = resolveIncomePaydaysForMonth({
+    month: selectedMonth,
+    incomeItems: income,
+    incomePaydayOverridesByIncomeId,
+    paydayModeSettings
+  });
+
   income.forEach((item) => {
-    const overrideDays = incomePaydayOverridesByIncomeId[item.id] || [];
-    const paydays = overrideDays.length > 0 ? overrideDays : [item.dueDayOfMonth ?? 1];
+    const paydays = paydaysByIncomeId[item.id] || [item.dueDayOfMonth ?? 1];
     paydays.forEach((payday, index) => {
       events.push(
         toEvent({

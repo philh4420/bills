@@ -21,10 +21,12 @@ import {
   MonthlyCardPayments,
   MonthlyIncomePaydays,
   MonthSnapshot,
+  PaydayModeSettings,
   PushSubscriptionRecord,
   PurchasePlan,
   ReconciliationRecord,
   RecurrenceRule,
+  SavingsGoal,
   UserProfile
 } from "@/types";
 
@@ -104,6 +106,13 @@ function normalizePushEndpointHealth(value: unknown): PushSubscriptionRecord["en
   return "healthy";
 }
 
+function normalizeSavingsGoalStatus(value: unknown): SavingsGoal["status"] {
+  if (value === "paused" || value === "completed") {
+    return value;
+  }
+  return "active";
+}
+
 export async function upsertUserProfile(profile: UserProfile): Promise<void> {
   await userDoc(profile.uid).set(stripUndefined(profile), { merge: true });
 }
@@ -154,6 +163,53 @@ export async function listMonthlyIncomePaydays(uid: string): Promise<MonthlyInco
         .filter(([, days]) => days.length > 0)
     )
   }));
+}
+
+export async function getPaydayModeSettings(uid: string): Promise<PaydayModeSettings | null> {
+  const primaryDoc = await userDoc(uid).collection(COLLECTIONS.paydayMode).doc("primary").get();
+  if (primaryDoc.exists) {
+    const data = primaryDoc.data() as Omit<PaydayModeSettings, "id">;
+    return {
+      id: primaryDoc.id,
+      ...data,
+      enabled: data.enabled === true,
+      cycleDays:
+        typeof data.cycleDays === "number" && Number.isFinite(data.cycleDays)
+          ? Math.max(7, Math.min(35, Math.round(data.cycleDays)))
+          : 28,
+      incomeIds: Array.isArray(data.incomeIds)
+        ? data.incomeIds.filter((value): value is string => typeof value === "string" && value.length > 0)
+        : undefined
+    };
+  }
+
+  const legacyDoc = await userDoc(uid).collection(COLLECTIONS.paydayMode).doc("default").get();
+  if (!legacyDoc.exists) {
+    return null;
+  }
+
+  const data = legacyDoc.data() as Omit<PaydayModeSettings, "id">;
+  return {
+    id: "default",
+    ...data,
+    enabled: data.enabled === true,
+    cycleDays:
+      typeof data.cycleDays === "number" && Number.isFinite(data.cycleDays)
+        ? Math.max(7, Math.min(35, Math.round(data.cycleDays)))
+        : 28,
+    incomeIds: Array.isArray(data.incomeIds)
+      ? data.incomeIds.filter((value): value is string => typeof value === "string" && value.length > 0)
+      : undefined
+  };
+}
+
+export async function upsertPaydayModeSettings(
+  uid: string,
+  payload: Partial<Omit<PaydayModeSettings, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.paydayMode).doc("primary").set(stripUndefined(payload), {
+    merge: true
+  });
 }
 
 export async function listLineItems(
@@ -381,6 +437,47 @@ export async function listMonthlyAdjustments(uid: string): Promise<MonthlyAdjust
     ...adjustment,
     dueDayOfMonth: adjustment.dueDayOfMonth ?? 1
   }));
+}
+
+export async function listSavingsGoals(uid: string): Promise<SavingsGoal[]> {
+  const snap = await userDoc(uid)
+    .collection(COLLECTIONS.savingsGoals)
+    .orderBy("startMonth", "asc")
+    .get();
+  return mapDocs<SavingsGoal>(snap.docs)
+    .map((goal) => ({
+      ...goal,
+      status: normalizeSavingsGoalStatus(goal.status),
+      currentAmount:
+        typeof goal.currentAmount === "number" && Number.isFinite(goal.currentAmount)
+          ? Math.max(0, goal.currentAmount)
+          : 0,
+      monthlyContribution:
+        typeof goal.monthlyContribution === "number" && Number.isFinite(goal.monthlyContribution)
+          ? Math.max(0, goal.monthlyContribution)
+          : 0
+    }))
+    .sort((a, b) => a.startMonth.localeCompare(b.startMonth) || a.name.localeCompare(b.name));
+}
+
+export async function createSavingsGoal(uid: string, payload: Omit<SavingsGoal, "id">): Promise<string> {
+  const id = randomUUID();
+  await userDoc(uid).collection(COLLECTIONS.savingsGoals).doc(id).set(stripUndefined(payload));
+  return id;
+}
+
+export async function updateSavingsGoal(
+  uid: string,
+  id: string,
+  payload: Partial<Omit<SavingsGoal, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.savingsGoals).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
+}
+
+export async function deleteSavingsGoal(uid: string, id: string): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.savingsGoals).doc(id).delete();
 }
 
 export async function listLoanedOutItems(uid: string): Promise<LoanedOutItem[]> {

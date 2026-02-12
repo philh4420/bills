@@ -1,6 +1,7 @@
 import { FORMULA_VARIANT_MAY_QUIRK, FORMULA_VARIANT_STANDARD } from "@/lib/util/constants";
 import { monthRangeInclusive } from "@/lib/util/dates";
 import { normalizeCurrency } from "@/lib/util/numbers";
+import { resolveIncomePaydaysForMonth } from "@/lib/payday/mode";
 import {
   AdjustmentCategory,
   CardAccount,
@@ -9,7 +10,8 @@ import {
   MonthlyAdjustment,
   MonthlyCardPayments,
   MonthlyIncomePaydays,
-  MonthSnapshot
+  MonthSnapshot,
+  PaydayModeSettings
 } from "@/types";
 
 export interface CardMonthProjectionEntry {
@@ -254,14 +256,19 @@ function isLoanPaidBackByMonth(
 function incomeTotalForMonth(
   month: string,
   incomeItems: LineItem[],
-  incomePaydays: MonthlyIncomePaydays[]
+  incomePaydayOverridesByIncomeId: Record<string, number[]>,
+  paydayModeSettings?: PaydayModeSettings | null
 ): number {
-  const overrideByIncomeId =
-    incomePaydays.find((entry) => entry.month === month)?.byIncomeId || {};
+  const paydaysByIncomeId = resolveIncomePaydaysForMonth({
+    month,
+    incomeItems,
+    incomePaydayOverridesByIncomeId,
+    paydayModeSettings
+  });
 
   return normalizeCurrency(
     incomeItems.reduce((acc, item) => {
-      const paydays = overrideByIncomeId[item.id];
+      const paydays = paydaysByIncomeId[item.id];
       const count = Array.isArray(paydays) && paydays.length > 0 ? paydays.length : 1;
       return acc + item.amount * count;
     }, 0)
@@ -277,6 +284,7 @@ export function computeMonthSnapshots(params: {
   myBills: LineItem[];
   adjustments: MonthlyAdjustment[];
   incomePaydays: MonthlyIncomePaydays[];
+  paydayModeSettings?: PaydayModeSettings | null;
   loanedOutItems: LoanedOutItem[];
   baseBankBalance: number;
 }): MonthSnapshot[] {
@@ -289,10 +297,14 @@ export function computeMonthSnapshots(params: {
     myBills,
     adjustments,
     incomePaydays,
+    paydayModeSettings,
     loanedOutItems,
     baseBankBalance
   } = params;
   const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
+  const incomePaydaysByMonth = new Map(
+    incomePaydays.map((entry) => [entry.month, entry.byIncomeId] as const)
+  );
 
   const baseHouseBillsTotal = totalLineItems(houseBills);
   const baseShoppingTotal = totalLineItems(shopping);
@@ -310,7 +322,12 @@ export function computeMonthSnapshots(params: {
       const shoppingAdjustments = totalAdjustmentsForMonth(payment.month, "shopping", adjustments);
       const myBillsAdjustments = totalAdjustmentsForMonth(payment.month, "myBills", adjustments);
 
-      const baseIncomeTotal = incomeTotalForMonth(payment.month, income, incomePaydays);
+      const baseIncomeTotal = incomeTotalForMonth(
+        payment.month,
+        income,
+        incomePaydaysByMonth.get(payment.month) || {},
+        paydayModeSettings
+      );
       const incomeTotal = normalizeCurrency(baseIncomeTotal + incomeAdjustments);
       const houseBillsTotal = normalizeCurrency(baseHouseBillsTotal + houseAdjustments);
       const shoppingTotal = normalizeCurrency(baseShoppingTotal + shoppingAdjustments);

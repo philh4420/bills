@@ -4,7 +4,13 @@ import { withOwnerAuth } from "@/lib/api/handler";
 import { monthKeySchema } from "@/lib/api/schemas";
 import { getDatePartsInTimeZone } from "@/lib/cards/due-date";
 import { extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
-import { listLineItems, listMonthlyIncomePaydays, listMonthlyPayments } from "@/lib/firestore/repository";
+import {
+  getPaydayModeSettings,
+  listLineItems,
+  listMonthlyIncomePaydays,
+  listMonthlyPayments
+} from "@/lib/firestore/repository";
+import { incomeUsesPaydayMode, resolveIncomePaydaysForMonth } from "@/lib/payday/mode";
 import { APP_TIMEZONE } from "@/lib/util/constants";
 import { jsonError, jsonOk } from "@/lib/util/http";
 
@@ -18,10 +24,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const [incomeItems, paydays, monthlyPayments] = await Promise.all([
+    const [incomeItems, paydays, monthlyPayments, paydayModeSettings] = await Promise.all([
       listLineItems(uid, "incomeItems"),
       listMonthlyIncomePaydays(uid),
-      listMonthlyPayments(uid)
+      listMonthlyPayments(uid),
+      getPaydayModeSettings(uid)
     ]);
 
     const months = extendMonthlyPaymentsToYearEnd(monthlyPayments).map((entry) => entry.month);
@@ -31,11 +38,17 @@ export async function GET(request: NextRequest) {
     const selectedMonth = monthParam || fallbackMonth;
     const selectedOverride = paydays.find((entry) => entry.month === selectedMonth) || null;
 
-    const byIncomeId: Record<string, number[]> = {};
-    incomeItems.forEach((incomeItem) => {
-      const overrideDays = selectedOverride?.byIncomeId[incomeItem.id] || [];
-      byIncomeId[incomeItem.id] =
-        overrideDays.length > 0 ? overrideDays : [incomeItem.dueDayOfMonth ?? 1];
+    const byIncomeId = resolveIncomePaydaysForMonth({
+      month: selectedMonth,
+      incomeItems,
+      incomePaydayOverridesByIncomeId: selectedOverride?.byIncomeId || {},
+      paydayModeSettings
+    });
+    const defaultByIncomeId = resolveIncomePaydaysForMonth({
+      month: selectedMonth,
+      incomeItems,
+      incomePaydayOverridesByIncomeId: {},
+      paydayModeSettings
     });
 
     return jsonOk({
@@ -45,10 +58,26 @@ export async function GET(request: NextRequest) {
         id: incomeItem.id,
         name: incomeItem.name,
         amount: incomeItem.amount,
-        defaultPayDay: incomeItem.dueDayOfMonth ?? 1
+        defaultPayDays: defaultByIncomeId[incomeItem.id] || [incomeItem.dueDayOfMonth ?? 1],
+        modeSource: incomeUsesPaydayMode(paydayModeSettings, incomeItem.id)
+          ? "payday-mode"
+          : "line-item-default"
       })),
       byIncomeId,
-      hasOverrides: Boolean(selectedOverride)
+      hasOverrides: Boolean(selectedOverride),
+      paydayMode: paydayModeSettings
+        ? {
+            enabled: paydayModeSettings.enabled,
+            anchorDate: paydayModeSettings.anchorDate,
+            cycleDays: paydayModeSettings.cycleDays,
+            incomeIds: paydayModeSettings.incomeIds || []
+          }
+        : {
+            enabled: false,
+            anchorDate: "",
+            cycleDays: 28,
+            incomeIds: []
+          }
     });
   });
 }

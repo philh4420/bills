@@ -12,9 +12,11 @@ import { daysInMonth, getDatePartsInTimeZone } from "@/lib/cards/due-date";
 import { buildMonthTimeline } from "@/lib/dashboard/timeline";
 import { computeCardMonthProjections, computeMonthSnapshots, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
 import { sumLedgerMovement } from "@/lib/ledger/engine";
+import { buildPlanningSummary } from "@/lib/planning/engine";
 import {
   getAlertSettings,
   getBankBalance,
+  getPaydayModeSettings,
   listCardAccounts,
   listLedgerEntries,
   listLoanedOutItems,
@@ -24,7 +26,8 @@ import {
   listMonthlyAdjustments,
   listMonthlyIncomePaydays,
   listMonthlyPayments,
-  listReconciliations
+  listReconciliations,
+  listSavingsGoals
 } from "@/lib/firestore/repository";
 import { monthKeySchema } from "@/lib/api/schemas";
 import { APP_TIMEZONE } from "@/lib/util/constants";
@@ -50,8 +53,10 @@ export async function GET(request: NextRequest) {
       myBills,
       adjustments,
       monthlyIncomePaydays,
+      paydayModeSettings,
       loanedOutItems,
       bankBalance,
+      savingsGoals,
       persistedAlertSettings,
       alertStates,
       monthClosures,
@@ -65,8 +70,10 @@ export async function GET(request: NextRequest) {
       listLineItems(uid, "myBills"),
       listMonthlyAdjustments(uid),
       listMonthlyIncomePaydays(uid),
+      getPaydayModeSettings(uid),
       listLoanedOutItems(uid),
       getBankBalance(uid),
+      listSavingsGoals(uid),
       getAlertSettings(uid),
       listAlertStates(uid),
       listMonthClosures(uid),
@@ -87,6 +94,7 @@ export async function GET(request: NextRequest) {
       myBills,
       adjustments,
       incomePaydays: monthlyIncomePaydays,
+      paydayModeSettings,
       loanedOutItems,
       baseBankBalance: bankBalance?.amount ?? 0
     });
@@ -127,6 +135,7 @@ export async function GET(request: NextRequest) {
       income,
       incomePaydayOverridesByIncomeId:
         monthlyIncomePaydays.find((entry) => entry.month === selectedMonth)?.byIncomeId || {},
+      paydayModeSettings,
       houseBills,
       shopping,
       myBills,
@@ -190,6 +199,21 @@ export async function GET(request: NextRequest) {
       now: new Date()
     });
 
+    const selectedIncomePaydayOverridesByIncomeId =
+      monthlyIncomePaydays.find((entry) => entry.month === selectedMonth)?.byIncomeId || {};
+    const planning = buildPlanningSummary({
+      selectedMonth,
+      snapshots,
+      selectedSnapshot: normalizedSnapshot,
+      cards,
+      selectedMonthlyPayment,
+      selectedProjectionByCardId: selectedProjection?.entries || {},
+      income,
+      selectedIncomePaydayOverridesByIncomeId,
+      paydayModeSettings,
+      savingsGoals
+    });
+
     return jsonOk({
       selectedMonth,
       availableMonths,
@@ -209,7 +233,8 @@ export async function GET(request: NextRequest) {
       },
       alertSettings,
       alerts: activeAlerts,
-      timeline
+      timeline,
+      planning
     });
   });
 }

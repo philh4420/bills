@@ -6,6 +6,7 @@ import {
 } from "@/lib/formulas/engine";
 import {
   getBankBalance,
+  getPaydayModeSettings,
   listCardAccounts,
   listLoanedOutItems,
   listMonthlyAdjustments,
@@ -33,6 +34,7 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
     myBills,
     adjustments,
     incomePaydays,
+    paydayModeSettings,
     loanedOutItems,
     bankBalance
   ] =
@@ -45,6 +47,7 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
       listLineItems(uid, "myBills"),
       listMonthlyAdjustments(uid),
       listMonthlyIncomePaydays(uid),
+      getPaydayModeSettings(uid),
       listLoanedOutItems(uid),
       getBankBalance(uid)
     ]);
@@ -61,6 +64,7 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
     myBills,
     adjustments,
     incomePaydays,
+    paydayModeSettings,
     loanedOutItems,
     baseBankBalance: bankBalance?.amount ?? 0
   });
@@ -80,6 +84,7 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
         monthlyPayments: payment,
         income,
         incomePaydayOverridesByIncomeId: paydaysByMonth.get(payment.month) || {},
+        paydayModeSettings,
         houseBills,
         shopping,
         myBills,

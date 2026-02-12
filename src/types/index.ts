@@ -70,6 +70,16 @@ export interface MonthlyIncomePaydays {
   updatedAt: string;
 }
 
+export interface PaydayModeSettings {
+  id: string;
+  enabled: boolean;
+  anchorDate: string; // YYYY-MM-DD
+  cycleDays: number; // e.g. 28
+  incomeIds?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LineItem {
   id: string;
   name: string;
@@ -170,6 +180,21 @@ export interface LoanedOutItem {
 export interface BankBalance {
   id: string;
   amount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SavingsGoalStatus = "active" | "paused" | "completed";
+
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  monthlyContribution: number;
+  startMonth: MonthKey;
+  targetMonth?: MonthKey;
+  status: SavingsGoalStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -353,6 +378,7 @@ export interface DashboardResponse {
   alertSettings: AlertSettings;
   alerts: SmartAlert[];
   timeline: MonthTimeline;
+  planning?: PlanningSummary;
 }
 
 export interface AlertSettings {
@@ -419,4 +445,96 @@ export interface MonthTimelineEvent {
 export interface MonthTimeline {
   month: MonthKey;
   events: MonthTimelineEvent[];
+}
+
+export interface SavingsGoalProjection {
+  id: string;
+  name: string;
+  status: SavingsGoalStatus;
+  targetAmount: number;
+  currentAmount: number;
+  monthlyContribution: number;
+  startMonth: MonthKey;
+  targetMonth?: MonthKey;
+  projectedCompletionMonth?: MonthKey | null;
+  remainingAmount: number;
+  monthContribution: number;
+}
+
+export interface SavingsProjectionSummary {
+  selectedMonth: MonthKey;
+  monthlyTargetTotal: number;
+  projectedMoneyLeftAfterSavings: number;
+  goals: SavingsGoalProjection[];
+  atRiskGoalIds: string[];
+}
+
+export interface DebtPayoffStrategySummary {
+  strategy: "snowball" | "avalanche";
+  monthlyBudget: number;
+  monthsToDebtFree: number | null;
+  totalInterest: number;
+  totalPaid: number;
+  payoffOrder: string[];
+}
+
+export interface DebtPayoffSummary {
+  totalDebt: number;
+  monthlyBudget: number;
+  byStrategy: {
+    snowball: DebtPayoffStrategySummary;
+    avalanche: DebtPayoffStrategySummary;
+  };
+}
+
+export interface NetWorthSummary {
+  month: MonthKey;
+  assets: number;
+  liabilities: number;
+  loanedOutRecoverable: number;
+  netWorth: number;
+  monthDelta: number;
+}
+
+export interface AnalyticsCategoryDelta {
+  key:
+    | "income"
+    | "cardSpend"
+    | "houseBills"
+    | "shopping"
+    | "myBills"
+    | "adjustments"
+    | "moneyLeft"
+    | "moneyInBank";
+  label: string;
+  currentValue: number;
+  previousValue: number;
+  delta: number;
+  deltaPercent: number | null;
+}
+
+export interface AnalyticsSummary {
+  month: MonthKey;
+  previousMonth?: MonthKey;
+  deltas: AnalyticsCategoryDelta[];
+  driftAlerts: Array<{
+    key: AnalyticsCategoryDelta["key"];
+    label: string;
+    delta: number;
+    deltaPercent: number;
+  }>;
+}
+
+export interface PlanningSummary {
+  paydayMode: {
+    enabled: boolean;
+    anchorDate: string;
+    cycleDays: number;
+    incomeIds: string[];
+    monthPaydaysByIncomeId: Record<string, number[]>;
+  };
+  savings: SavingsProjectionSummary;
+  debtPayoff: DebtPayoffSummary;
+  netWorth: NetWorthSummary;
+  analytics: AnalyticsSummary;
 }
