@@ -9,7 +9,9 @@ import {
   AlertStateRecord,
   BackupRecord,
   AuditEventRecord,
+  BankAccount,
   BankBalance,
+  BankTransfer,
   CardAccount,
   CommandRecord,
   ImportRecord,
@@ -111,6 +113,13 @@ function normalizeSavingsGoalStatus(value: unknown): SavingsGoal["status"] {
     return value;
   }
   return "active";
+}
+
+function normalizeBankAccountType(value: unknown): BankAccount["accountType"] {
+  if (value === "savings" || value === "cash") {
+    return value;
+  }
+  return "current";
 }
 
 export async function upsertUserProfile(profile: UserProfile): Promise<void> {
@@ -586,15 +595,144 @@ export async function deleteLoanedOutItem(uid: string, id: string): Promise<void
   await userDoc(uid).collection(COLLECTIONS.loanedOutItems).doc(id).delete();
 }
 
+export async function listBankAccounts(uid: string): Promise<BankAccount[]> {
+  const snap = await userDoc(uid).collection(COLLECTIONS.bankAccounts).get();
+  const accounts = mapDocs<BankAccount>(snap.docs)
+    .map((account) => ({
+      ...account,
+      accountType: normalizeBankAccountType(account.accountType),
+      includeInNetWorth: account.includeInNetWorth !== false
+    }))
+    .sort((a, b) => {
+      const typeOrder = ["current", "savings", "cash"];
+      const leftRank = typeOrder.indexOf(a.accountType);
+      const rightRank = typeOrder.indexOf(b.accountType);
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+  if (accounts.length > 0) {
+    return accounts;
+  }
+
+  const legacyDoc = await userDoc(uid).collection(COLLECTIONS.bankBalances).doc("primary").get();
+  if (!legacyDoc.exists) {
+    return [];
+  }
+  const data = legacyDoc.data() as Omit<BankBalance, "id">;
+  return [
+    {
+      id: "current",
+      name: "Current Account",
+      accountType: "current",
+      balance: typeof data.amount === "number" && Number.isFinite(data.amount) ? data.amount : 0,
+      includeInNetWorth: true,
+      createdAt: data.createdAt || new Date().toISOString(),
+      updatedAt: data.updatedAt || new Date().toISOString()
+    }
+  ];
+}
+
+export async function createBankAccount(uid: string, payload: Omit<BankAccount, "id">): Promise<string> {
+  const id = randomUUID();
+  await userDoc(uid).collection(COLLECTIONS.bankAccounts).doc(id).set(stripUndefined(payload));
+  return id;
+}
+
+export async function updateBankAccount(
+  uid: string,
+  id: string,
+  payload: Partial<Omit<BankAccount, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.bankAccounts).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
+}
+
+export async function deleteBankAccount(uid: string, id: string): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.bankAccounts).doc(id).delete();
+}
+
+export async function listBankTransfers(uid: string): Promise<BankTransfer[]> {
+  const collection = userDoc(uid).collection(COLLECTIONS.bankTransfers);
+  let snap: Awaited<ReturnType<typeof collection.get>>;
+  try {
+    snap = await collection
+      .orderBy("month", "asc")
+      .orderBy("day", "asc")
+      .get();
+  } catch {
+    // Fallback avoids hard dependency on a composite index during rollout.
+    snap = await collection.get();
+  }
+
+  return mapDocs<BankTransfer>(snap.docs)
+    .map((transfer) => ({
+    ...transfer,
+    day:
+      typeof transfer.day === "number" && Number.isFinite(transfer.day)
+        ? Math.max(1, Math.min(31, Math.round(transfer.day)))
+        : 1,
+    amount:
+      typeof transfer.amount === "number" && Number.isFinite(transfer.amount)
+        ? Math.max(0, transfer.amount)
+        : 0
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month) || a.day - b.day || a.id.localeCompare(b.id));
+}
+
+export async function createBankTransfer(uid: string, payload: Omit<BankTransfer, "id">): Promise<string> {
+  const id = randomUUID();
+  await userDoc(uid).collection(COLLECTIONS.bankTransfers).doc(id).set(stripUndefined(payload));
+  return id;
+}
+
+export async function updateBankTransfer(
+  uid: string,
+  id: string,
+  payload: Partial<Omit<BankTransfer, "id">>
+): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.bankTransfers).doc(id).set(stripUndefined(payload), {
+    merge: true
+  });
+}
+
+export async function deleteBankTransfer(uid: string, id: string): Promise<void> {
+  await userDoc(uid).collection(COLLECTIONS.bankTransfers).doc(id).delete();
+}
+
 export async function getBankBalance(uid: string): Promise<BankBalance | null> {
   const doc = await userDoc(uid).collection(COLLECTIONS.bankBalances).doc("primary").get();
-  if (!doc.exists) {
+  if (doc.exists) {
+    const data = doc.data() as Omit<BankBalance, "id">;
+    return {
+      id: doc.id,
+      ...data
+    };
+  }
+
+  const accounts = await listBankAccounts(uid);
+  if (accounts.length === 0) {
     return null;
   }
-  const data = doc.data() as Omit<BankBalance, "id">;
+
+  const amount = accounts.reduce((acc, account) => acc + account.balance, 0);
+  const latestUpdatedAt = accounts
+    .map((account) => account.updatedAt)
+    .filter((value) => typeof value === "string" && value.length > 0)
+    .sort((a, b) => b.localeCompare(a))[0];
+  const earliestCreatedAt = accounts
+    .map((account) => account.createdAt)
+    .filter((value) => typeof value === "string" && value.length > 0)
+    .sort((a, b) => a.localeCompare(b))[0];
+
   return {
-    id: doc.id,
-    ...data
+    id: "primary",
+    amount,
+    createdAt: earliestCreatedAt || new Date().toISOString(),
+    updatedAt: latestUpdatedAt || new Date().toISOString()
   };
 }
 
@@ -606,6 +744,24 @@ export async function upsertBankBalance(
   await userDoc(uid).collection(COLLECTIONS.bankBalances).doc(id).set(stripUndefined(payload), {
     merge: true
   });
+
+  const accountsSnap = await userDoc(uid).collection(COLLECTIONS.bankAccounts).limit(1).get();
+  if (accountsSnap.empty) {
+    await userDoc(uid)
+      .collection(COLLECTIONS.bankAccounts)
+      .doc("current")
+      .set(
+        stripUndefined({
+          name: "Current Account",
+          accountType: "current",
+          balance: payload.amount,
+          includeInNetWorth: true,
+          createdAt: payload.createdAt,
+          updatedAt: payload.updatedAt
+        }),
+        { merge: true }
+      );
+  }
 }
 
 export async function getAlertSettings(uid: string): Promise<AlertSettings | null> {

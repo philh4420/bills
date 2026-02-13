@@ -221,6 +221,76 @@ export const bankBalancePutSchema = z.object({
   amount: z.number()
 });
 
+export const bankAccountTypeSchema = z.enum(["current", "savings", "cash"]);
+
+export const bankAccountCreateSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  accountType: bankAccountTypeSchema.default("current"),
+  balance: z.number(),
+  includeInNetWorth: z.boolean().default(true)
+});
+
+export const bankAccountPatchSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  accountType: bankAccountTypeSchema.optional(),
+  balance: z.number().optional(),
+  includeInNetWorth: z.boolean().optional()
+});
+
+export const bankTransferCreateSchema = z
+  .object({
+    month: monthKeySchema,
+    day: z.number().int().min(1).max(31),
+    fromAccountId: z.string().trim().min(1),
+    toAccountId: z.string().trim().min(1),
+    amount: z.number().positive(),
+    note: z.string().trim().max(240).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.fromAccountId === value.toAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["toAccountId"],
+        message: "toAccountId must be different from fromAccountId"
+      });
+    }
+  });
+
+export const bankTransferPatchSchema = z
+  .object({
+    month: monthKeySchema.optional(),
+    day: z.number().int().min(1).max(31).optional(),
+    fromAccountId: z.string().trim().min(1).optional(),
+    toAccountId: z.string().trim().min(1).optional(),
+    amount: z.number().positive().optional(),
+    note: z.string().trim().max(240).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.fromAccountId && value.toAccountId && value.fromAccountId === value.toAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["toAccountId"],
+        message: "toAccountId must be different from fromAccountId"
+      });
+    }
+  });
+
+export const scenarioEvaluateSchema = z.object({
+  month: monthKeySchema,
+  extraIncome: z.number().optional().default(0),
+  extraExpenses: z.number().optional().default(0),
+  extraCardPayments: z.number().optional().default(0),
+  accountDeltas: z.record(z.string(), z.number()).optional(),
+  note: z.string().trim().max(240).optional()
+});
+
+export const calendarDueDayUpdateSchema = z.object({
+  month: monthKeySchema,
+  sourceType: z.enum(["cardAccount", "houseBill", "shoppingItem", "myBill", "monthlyAdjustment"]),
+  sourceId: z.string().trim().min(1),
+  dueDayOfMonth: z.number().int().min(1).max(31)
+});
+
 export const savingsGoalStatusSchema = z.enum(["active", "paused", "completed"]);
 
 export const savingsGoalCreateSchema = z

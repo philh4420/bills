@@ -11,6 +11,8 @@ export const COLLECTIONS = {
   monthlyAdjustments: "monthlyAdjustments",
   loanedOutItems: "loanedOutItems",
   bankBalances: "bankBalances",
+  bankAccounts: "bankAccounts",
+  bankTransfers: "bankTransfers",
   purchasePlans: "purchasePlans",
   monthSnapshots: "monthSnapshots",
   ledgerEntries: "ledgerEntries",

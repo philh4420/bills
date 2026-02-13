@@ -6,6 +6,8 @@ import {
 } from "@/lib/formulas/engine";
 import {
   getBankBalance,
+  listBankAccounts,
+  listBankTransfers,
   getPaydayModeSettings,
   listCardAccounts,
   listLoanedOutItems,
@@ -23,6 +25,7 @@ import {
 import { dispatchSmartAlertsForUser } from "@/lib/notifications/smart-alerts";
 import { syncDefaultRecurrenceRules } from "@/lib/recurrence/sync";
 import { monthKeyInTimeZone } from "@/lib/util/dates";
+import { sumBankAccountBalances } from "@/lib/bank/accounts";
 
 export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
   const [
@@ -36,7 +39,9 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
     incomePaydays,
     paydayModeSettings,
     loanedOutItems,
-    bankBalance
+    bankBalance,
+    bankAccounts,
+    bankTransfers
   ] =
     await Promise.all([
       listCardAccounts(uid),
@@ -49,7 +54,9 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
       listMonthlyIncomePaydays(uid),
       getPaydayModeSettings(uid),
       listLoanedOutItems(uid),
-      getBankBalance(uid)
+      getBankBalance(uid),
+      listBankAccounts(uid),
+      listBankTransfers(uid)
     ]);
 
   const timelinePayments = extendMonthlyPaymentsToYearEnd(monthlyPayments);
@@ -66,13 +73,16 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
     incomePaydays,
     paydayModeSettings,
     loanedOutItems,
-    baseBankBalance: bankBalance?.amount ?? 0
+    baseBankBalance: bankAccounts.length > 0 ? sumBankAccountBalances(bankAccounts) : bankBalance?.amount ?? 0
   });
 
   await replaceMonthSnapshots(uid, snapshots);
 
   const paydaysByMonth = new Map(
     incomePaydays.map((entry) => [entry.month, entry.byIncomeId] as const)
+  );
+  const bankAccountNameById = Object.fromEntries(
+    bankAccounts.map((account) => [account.id, account.name])
   );
   const nowIso = new Date().toISOString();
 
@@ -89,7 +99,9 @@ export async function recomputeAndPersistSnapshots(uid: string): Promise<void> {
         shopping,
         myBills,
         adjustments,
-        loanedOutItems
+        loanedOutItems,
+        bankTransfers,
+        bankAccountNameById
       });
 
       const plannedEntries = buildPlannedLedgerEntriesForMonth({

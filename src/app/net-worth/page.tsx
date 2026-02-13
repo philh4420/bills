@@ -14,6 +14,28 @@ import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 interface PlanningData {
   selectedMonth: string;
   availableMonths: string[];
+  bankAccounts?: Array<{
+    id: string;
+    name: string;
+    accountType: "current" | "savings" | "cash";
+    balance: number;
+    includeInNetWorth: boolean;
+  }>;
+  bankAccountProjection?: {
+    month: string;
+    entries: Array<{
+      accountId: string;
+      name: string;
+      accountType: "current" | "savings" | "cash";
+      includeInNetWorth: boolean;
+      openingBalance: number;
+      closingBalance: number;
+      netChange: number;
+    }>;
+    totalOpeningBalance: number;
+    totalClosingBalance: number;
+    netMovementApplied: number;
+  };
   planning: {
     savings: {
       monthlyTargetTotal: number;
@@ -193,6 +215,26 @@ export default function NetWorthPage() {
                   )}
                 </MeasuredChart>
               </div>
+
+              {query.data.bankAccountProjection?.entries?.length ? (
+                <div className="panel p-4">
+                  <p className="label">Assets by Account ({formatMonthKeyUK(query.data.bankAccountProjection.month)})</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {query.data.bankAccountProjection.entries.map((entry) => (
+                      <div key={`net-worth-account-${entry.accountId}`} className="rounded-xl border border-[var(--ring)] bg-white/75 p-3">
+                        <p className="text-sm font-semibold text-[var(--ink-main)]">{entry.name}</p>
+                        <p className="mt-1 text-xs text-[var(--ink-soft)] capitalize">
+                          {entry.accountType} {entry.includeInNetWorth ? "· in net worth" : "· excluded"}
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-[var(--ink-main)]">
+                          {formatGBP(entry.closingBalance)}
+                        </p>
+                        <p className="text-xs text-[var(--ink-soft)]">Change: {formatGBP(entry.netChange)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </SectionPanel>

@@ -2,6 +2,7 @@ import { daysInMonth } from "@/lib/cards/due-date";
 import { resolveIncomePaydaysForMonth } from "@/lib/payday/mode";
 import { normalizeCurrency } from "@/lib/util/numbers";
 import {
+  BankTransfer,
   CardAccount,
   LineItem,
   LoanedOutItem,
@@ -44,6 +45,10 @@ function toEvent(params: {
   monthNumber: number;
   dueDayOfMonth?: number | null;
   amount: number;
+  sourceType?: MonthTimelineEvent["sourceType"];
+  sourceId?: string;
+  editableDueDay?: boolean;
+  transferAmount?: number;
 }): MonthTimelineEvent {
   const day = clampDay(params.year, params.monthNumber, params.dueDayOfMonth);
   return {
@@ -54,7 +59,14 @@ function toEvent(params: {
     category: params.category,
     day,
     date: toIsoDate(params.year, params.monthNumber, day),
-    amount: normalizeCurrency(params.amount)
+    amount: normalizeCurrency(params.amount),
+    sourceType: params.sourceType,
+    sourceId: params.sourceId,
+    editableDueDay: params.editableDueDay,
+    transferAmount:
+      typeof params.transferAmount === "number" && Number.isFinite(params.transferAmount)
+        ? normalizeCurrency(Math.max(0, params.transferAmount))
+        : undefined
   };
 }
 
@@ -82,6 +94,8 @@ export function buildMonthTimeline(params: {
     Pick<MonthlyAdjustment, "id" | "name" | "amount" | "category" | "startMonth" | "endMonth" | "dueDayOfMonth">
   >;
   loanedOutItems: Array<Pick<LoanedOutItem, "id" | "name" | "amount" | "startMonth" | "status" | "paidBackMonth">>;
+  bankTransfers?: Array<Pick<BankTransfer, "id" | "month" | "day" | "amount" | "fromAccountId" | "toAccountId" | "note">>;
+  bankAccountNameById?: Record<string, string>;
 }): MonthTimeline {
   const {
     selectedMonth,
@@ -94,7 +108,9 @@ export function buildMonthTimeline(params: {
     shopping,
     myBills,
     adjustments,
-    loanedOutItems
+    loanedOutItems,
+    bankTransfers = [],
+    bankAccountNameById = {}
   } = params;
   const { year, monthNumber } = parseMonthKey(selectedMonth);
   const events: MonthTimelineEvent[] = [];
@@ -116,7 +132,10 @@ export function buildMonthTimeline(params: {
         year,
         monthNumber,
         dueDayOfMonth: derivedDueDay,
-        amount: -Math.max(0, monthlyPayments?.byCardId[card.id] ?? 0)
+        amount: -Math.max(0, monthlyPayments?.byCardId[card.id] ?? 0),
+        sourceType: "cardAccount",
+        sourceId: card.id,
+        editableDueDay: true
       })
     );
   });
@@ -141,7 +160,10 @@ export function buildMonthTimeline(params: {
           year,
           monthNumber,
           dueDayOfMonth: payday,
-          amount: Math.max(0, item.amount)
+          amount: Math.max(0, item.amount),
+          sourceType: "incomeItem",
+          sourceId: item.id,
+          editableDueDay: false
         })
       );
     });
@@ -165,7 +187,15 @@ export function buildMonthTimeline(params: {
           year,
           monthNumber,
           dueDayOfMonth: item.dueDayOfMonth ?? 1,
-          amount: -Math.max(0, item.amount)
+          amount: -Math.max(0, item.amount),
+          sourceType:
+            collection.key === "houseBills"
+              ? "houseBill"
+              : collection.key === "shopping"
+                ? "shoppingItem"
+                : "myBill",
+          sourceId: item.id,
+          editableDueDay: true
         })
       );
     });
@@ -188,7 +218,10 @@ export function buildMonthTimeline(params: {
           year,
           monthNumber,
           dueDayOfMonth: adjustment.dueDayOfMonth ?? 1,
-          amount: sign * Math.max(0, adjustment.amount)
+          amount: sign * Math.max(0, adjustment.amount),
+          sourceType: "monthlyAdjustment",
+          sourceId: adjustment.id,
+          editableDueDay: true
         })
       );
     });
@@ -206,7 +239,10 @@ export function buildMonthTimeline(params: {
           year,
           monthNumber,
           dueDayOfMonth: 1,
-          amount: -Math.max(0, loan.amount)
+          amount: -Math.max(0, loan.amount),
+          sourceType: "loanedOutItem",
+          sourceId: loan.id,
+          editableDueDay: false
         })
       );
     });
@@ -224,7 +260,35 @@ export function buildMonthTimeline(params: {
           year,
           monthNumber,
           dueDayOfMonth: 1,
-          amount: Math.max(0, loan.amount)
+          amount: Math.max(0, loan.amount),
+          sourceType: "loanedOutItem",
+          sourceId: loan.id,
+          editableDueDay: false
+        })
+      );
+    });
+
+  bankTransfers
+    .filter((transfer) => transfer.month === selectedMonth)
+    .forEach((transfer) => {
+      const fromLabel = bankAccountNameById[transfer.fromAccountId] || "From account";
+      const toLabel = bankAccountNameById[transfer.toAccountId] || "To account";
+      const note = transfer.note?.trim();
+      events.push(
+        toEvent({
+          id: `transfer-${transfer.id}`,
+          type: "transfer",
+          title: `${fromLabel} -> ${toLabel}`,
+          subtitle: note || "Internal transfer",
+          category: "bankTransfer",
+          year,
+          monthNumber,
+          dueDayOfMonth: transfer.day,
+          amount: 0,
+          sourceType: "bankTransfer",
+          sourceId: transfer.id,
+          editableDueDay: false,
+          transferAmount: transfer.amount
         })
       );
     });

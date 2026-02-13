@@ -1,6 +1,7 @@
 import { monthRangeInclusive } from "@/lib/util/dates";
 import { normalizeCurrency } from "@/lib/util/numbers";
 import { resolveIncomePaydaysForMonth } from "@/lib/payday/mode";
+import { buildSubscriptionIntelligence } from "@/lib/subscriptions/intelligence";
 import {
   AnalyticsCategoryDelta,
   AnalyticsSummary,
@@ -474,6 +475,9 @@ export function buildPlanningSummary(params: {
   selectedMonthlyPayment: MonthlyCardPayments | null;
   selectedProjectionByCardId: Record<string, { closingBalance: number }>;
   income: LineItem[];
+  houseBills: LineItem[];
+  shopping: LineItem[];
+  myBills: LineItem[];
   selectedIncomePaydayOverridesByIncomeId: Record<string, number[]>;
   paydayModeSettings?: PaydayModeSettings | null;
   savingsGoals: SavingsGoal[];
@@ -512,7 +516,12 @@ export function buildPlanningSummary(params: {
       selectedMonth: params.selectedMonth,
       snapshots: params.snapshots,
       selectedSnapshot: params.selectedSnapshot
+    }),
+    subscriptionIntelligence: buildSubscriptionIntelligence({
+      month: params.selectedMonth,
+      houseBills: params.houseBills,
+      myBills: params.myBills,
+      shopping: params.shopping
     })
   };
 }
-

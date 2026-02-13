@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 
 import { withOwnerAuth } from "@/lib/api/handler";
+import { buildBankAccountProjectionForMonth, sumBankAccountBalances } from "@/lib/bank/accounts";
 import { monthKeySchema } from "@/lib/api/schemas";
 import { getDatePartsInTimeZone } from "@/lib/cards/due-date";
 import { computeCardMonthProjections, computeMonthSnapshots, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
@@ -8,6 +9,8 @@ import { buildPlanningSummary } from "@/lib/planning/engine";
 import {
   getBankBalance,
   getPaydayModeSettings,
+  listBankAccounts,
+  listBankTransfers,
   listCardAccounts,
   listLoanedOutItems,
   listLineItems,
@@ -42,6 +45,8 @@ export async function GET(request: NextRequest) {
       paydayModeSettings,
       loanedOutItems,
       bankBalance,
+      bankAccounts,
+      bankTransfers,
       savingsGoals
     ] = await Promise.all([
       listCardAccounts(uid),
@@ -55,6 +60,8 @@ export async function GET(request: NextRequest) {
       getPaydayModeSettings(uid),
       listLoanedOutItems(uid),
       getBankBalance(uid),
+      listBankAccounts(uid),
+      listBankTransfers(uid),
       listSavingsGoals(uid)
     ]);
 
@@ -70,7 +77,7 @@ export async function GET(request: NextRequest) {
       incomePaydays: monthlyIncomePaydays,
       paydayModeSettings,
       loanedOutItems,
-      baseBankBalance: bankBalance?.amount ?? 0
+      baseBankBalance: bankAccounts.length > 0 ? sumBankAccountBalances(bankAccounts) : bankBalance?.amount ?? 0
     });
 
     const availableMonths = snapshots.map((snapshot) => snapshot.month);
@@ -86,6 +93,12 @@ export async function GET(request: NextRequest) {
     );
     const selectedIncomePaydayOverridesByIncomeId =
       monthlyIncomePaydays.find((entry) => entry.month === selectedMonth)?.byIncomeId || {};
+    const bankAccountProjection = buildBankAccountProjectionForMonth({
+      month: selectedMonth,
+      accounts: bankAccounts,
+      transfers: bankTransfers,
+      snapshots
+    });
 
     const planning = buildPlanningSummary({
       selectedMonth,
@@ -95,6 +108,9 @@ export async function GET(request: NextRequest) {
       selectedMonthlyPayment,
       selectedProjectionByCardId: selectedProjection?.entries || {},
       income,
+      houseBills,
+      shopping,
+      myBills,
       selectedIncomePaydayOverridesByIncomeId,
       paydayModeSettings,
       savingsGoals
@@ -104,6 +120,9 @@ export async function GET(request: NextRequest) {
       selectedMonth,
       availableMonths,
       planning,
+      bankAccounts,
+      bankTransfers,
+      bankAccountProjection,
       netWorthTimeline: snapshots.map((snapshot) => ({
         month: snapshot.month,
         assets: normalizeCurrency(snapshot.moneyInBank + snapshot.loanedOutOutstandingTotal),
@@ -115,4 +134,3 @@ export async function GET(request: NextRequest) {
     });
   });
 }
-

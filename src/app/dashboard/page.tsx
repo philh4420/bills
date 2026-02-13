@@ -18,13 +18,25 @@ import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
 interface TimelineEvent {
   id: string;
-  type: "card-due" | "bill-due" | "adjustment";
+  type: "card-due" | "bill-due" | "adjustment" | "transfer";
   title: string;
   subtitle?: string;
   date: string;
   day: number;
   amount: number;
   category: string;
+  sourceType?:
+    | "cardAccount"
+    | "houseBill"
+    | "shoppingItem"
+    | "myBill"
+    | "monthlyAdjustment"
+    | "incomeItem"
+    | "loanedOutItem"
+    | "bankTransfer";
+  sourceId?: string;
+  editableDueDay?: boolean;
+  transferAmount?: number;
 }
 
 interface DashboardData {
@@ -56,6 +68,38 @@ interface DashboardData {
     inferred: boolean;
   } | null;
   bankBalance: { id: string; amount: number } | null;
+  bankAccounts?: Array<{
+    id: string;
+    name: string;
+    accountType: "current" | "savings" | "cash";
+    balance: number;
+    includeInNetWorth: boolean;
+  }>;
+  bankTransfers?: Array<{
+    id: string;
+    month: string;
+    day: number;
+    date: string;
+    fromAccountId: string;
+    toAccountId: string;
+    amount: number;
+    note?: string;
+  }>;
+  bankAccountProjection?: {
+    month: string;
+    entries: Array<{
+      accountId: string;
+      name: string;
+      accountType: "current" | "savings" | "cash";
+      includeInNetWorth: boolean;
+      openingBalance: number;
+      closingBalance: number;
+      netChange: number;
+    }>;
+    totalOpeningBalance: number;
+    totalClosingBalance: number;
+    netMovementApplied: number;
+  };
   loanedOutItems: Array<{
     id: string;
     name: string;
@@ -133,6 +177,26 @@ interface DashboardData {
     month: string;
     events: TimelineEvent[];
   };
+  subscriptionIntelligence?: {
+    month: string;
+    ranked: Array<{
+      id: string;
+      sourceCollection: "houseBills" | "myBills" | "shoppingItems";
+      name: string;
+      monthlyAmount: number;
+      annualAmount: number;
+      rank: number;
+    }>;
+    suggestions: Array<{
+      id: string;
+      name: string;
+      currentMonthly: number;
+      suggestedMonthly: number;
+      potentialMonthlySavings: number;
+      potentialAnnualSavings: number;
+      reason: string;
+    }>;
+  };
   planning?: {
     paydayMode: {
       enabled: boolean;
@@ -207,11 +271,62 @@ interface DashboardData {
   };
 }
 
+interface ScenarioResponse {
+  selectedMonth: string;
+  scenario: {
+    month: string;
+    note?: string;
+    input: {
+      month: string;
+      extraIncome: number;
+      extraExpenses: number;
+      extraCardPayments: number;
+      accountDeltas: Record<string, number>;
+      note?: string;
+    };
+    base: {
+      incomeTotal: number;
+      cardSpendTotal: number;
+      cardBalanceTotal: number;
+      moneyLeft: number;
+      moneyInBank: number;
+      netWorth: number;
+    };
+    projected: {
+      incomeTotal: number;
+      cardSpendTotal: number;
+      cardBalanceTotal: number;
+      moneyLeft: number;
+      moneyInBank: number;
+      netWorth: number;
+    };
+    delta: {
+      moneyLeft: number;
+      moneyInBank: number;
+      cardBalanceTotal: number;
+      netWorth: number;
+    };
+    accountProjection: {
+      entries: Array<{
+        accountId: string;
+        name: string;
+        accountType: "current" | "savings" | "cash";
+        includeInNetWorth: boolean;
+        openingBalance: number;
+        closingBalance: number;
+        netChange: number;
+      }>;
+      totalClosingBalance: number;
+    };
+  };
+}
+
 interface CalendarCell {
   day: number | null;
   events: TimelineEvent[];
   outgoings: number;
   incomings: number;
+  pressure: number;
 }
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -246,10 +361,38 @@ function timelineChipClass(type: TimelineEvent["type"]): string {
   if (type === "card-due") {
     return "calendar-event card-due";
   }
+  if (type === "transfer") {
+    return "calendar-event transfer";
+  }
   if (type === "adjustment") {
     return "calendar-event adjustment";
   }
   return "calendar-event bill-due";
+}
+
+function dayPressureClass(pressure: number, maxPressure: number): string {
+  if (maxPressure <= 0.0001 || pressure <= 0.0001) {
+    return "";
+  }
+  const ratio = pressure / maxPressure;
+  if (ratio >= 0.8) {
+    return "is-pressure-high";
+  }
+  if (ratio >= 0.45) {
+    return "is-pressure-medium";
+  }
+  return "is-pressure-low";
+}
+
+function eventAmountLabel(event: TimelineEvent): string | null {
+  if (event.type === "transfer") {
+    const transferAmount = event.transferAmount ?? 0;
+    return transferAmount > 0 ? formatGBP(transferAmount) : null;
+  }
+  if (event.amount === 0) {
+    return null;
+  }
+  return formatGBP(event.amount);
 }
 
 function buildCalendar(month: string, events: TimelineEvent[]): CalendarCell[][] {
@@ -278,7 +421,7 @@ function buildCalendar(month: string, events: TimelineEvent[]): CalendarCell[][]
   for (let index = 0; index < totalCells; index += 1) {
     const day = index - firstWeekday + 1;
     if (day < 1 || day > daysInMonth) {
-      cells.push({ day: null, events: [], outgoings: 0, incomings: 0 });
+      cells.push({ day: null, events: [], outgoings: 0, incomings: 0, pressure: 0 });
       continue;
     }
 
@@ -291,7 +434,13 @@ function buildCalendar(month: string, events: TimelineEvent[]): CalendarCell[][]
     });
     const outgoings = dayEvents.reduce((acc, event) => acc + (event.amount < 0 ? Math.abs(event.amount) : 0), 0);
     const incomings = dayEvents.reduce((acc, event) => acc + (event.amount > 0 ? event.amount : 0), 0);
-    cells.push({ day, events: dayEvents, outgoings, incomings });
+    cells.push({
+      day,
+      events: dayEvents,
+      outgoings,
+      incomings,
+      pressure: Math.max(0, outgoings - incomings)
+    });
   }
 
   const weeks: CalendarCell[][] = [];
@@ -339,6 +488,17 @@ export default function DashboardPage() {
   const [savingReconciliation, setSavingReconciliation] = useState(false);
   const [savingClosure, setSavingClosure] = useState(false);
   const [alertActionBusyId, setAlertActionBusyId] = useState<string | null>(null);
+  const [draggedTimelineEvent, setDraggedTimelineEvent] = useState<TimelineEvent | null>(null);
+  const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
+  const [scenarioDraft, setScenarioDraft] = useState({
+    extraIncome: "0",
+    extraExpenses: "0",
+    extraCardPayments: "0",
+    note: ""
+  });
+  const [scenarioResult, setScenarioResult] = useState<ScenarioResponse["scenario"] | null>(null);
+  const [scenarioBusy, setScenarioBusy] = useState(false);
+  const [scenarioMessage, setScenarioMessage] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dashboard", month],
@@ -384,6 +544,11 @@ export default function DashboardPage() {
     setReconciliationMessage(null);
   }, [data]);
 
+  useEffect(() => {
+    setScenarioResult(null);
+    setScenarioMessage(null);
+  }, [data?.selectedMonth]);
+
   const chartData = useMemo(() => {
     if (!data?.snapshot) {
       return [];
@@ -406,16 +571,34 @@ export default function DashboardPage() {
     return buildCalendar(data.timeline.month, data.timeline.events || []);
   }, [data?.timeline]);
 
-  const heavyWeeks = useMemo(() => {
-    return calendarWeeks
-      .map((week, index) => ({
+  const weekPressure = useMemo(() => {
+    return calendarWeeks.map((week, index) => {
+      const totalOutgoings = week.reduce((acc, day) => acc + day.outgoings, 0);
+      const totalIncomings = week.reduce((acc, day) => acc + day.incomings, 0);
+      const pressure = Math.max(0, totalOutgoings - totalIncomings);
+      return {
         index,
-        totalOutgoings: week.reduce((acc, day) => acc + day.outgoings, 0)
-      }))
-      .filter((week) => week.totalOutgoings > 0)
-      .sort((a, b) => b.totalOutgoings - a.totalOutgoings)
-      .slice(0, 2);
+        totalOutgoings,
+        totalIncomings,
+        pressure
+      };
+    });
   }, [calendarWeeks]);
+
+  const heavyWeeks = useMemo(() => {
+    return weekPressure
+      .filter((week) => week.pressure > 0)
+      .sort((a, b) => b.pressure - a.pressure)
+      .slice(0, 2);
+  }, [weekPressure]);
+
+  const maxDayPressure = useMemo(
+    () =>
+      calendarWeeks
+        .flat()
+        .reduce((acc, day) => Math.max(acc, day.pressure), 0),
+    [calendarWeeks]
+  );
 
   const timelineSummary = useMemo(() => {
     const events = data?.timeline?.events || [];
@@ -632,6 +815,93 @@ export default function DashboardPage() {
     }
   }
 
+  async function runScenario() {
+    const selectedMonth = month || data?.selectedMonth || "";
+    if (!selectedMonth) {
+      setScenarioMessage("No month selected.");
+      return;
+    }
+
+    const extraIncome = Number.parseFloat(scenarioDraft.extraIncome);
+    const extraExpenses = Number.parseFloat(scenarioDraft.extraExpenses);
+    const extraCardPayments = Number.parseFloat(scenarioDraft.extraCardPayments);
+    if (!Number.isFinite(extraIncome) || !Number.isFinite(extraExpenses) || !Number.isFinite(extraCardPayments)) {
+      setScenarioMessage("Scenario values must be valid numbers.");
+      return;
+    }
+
+    setScenarioBusy(true);
+    setScenarioMessage(null);
+    try {
+      const response = await authedRequest<ScenarioResponse>(getIdToken, "/api/scenario", {
+        method: "POST",
+        body: JSON.stringify({
+          month: selectedMonth,
+          extraIncome,
+          extraExpenses,
+          extraCardPayments,
+          note: scenarioDraft.note.trim() || undefined
+        })
+      });
+      setScenarioResult(response.scenario);
+      setScenarioMessage("Scenario calculated. Live data not changed.");
+    } catch (requestError) {
+      setScenarioMessage(formatApiClientError(requestError, "Failed to run scenario."));
+    } finally {
+      setScenarioBusy(false);
+    }
+  }
+
+  function clearScenario() {
+    setScenarioResult(null);
+    setScenarioMessage(null);
+    setScenarioDraft({
+      extraIncome: "0",
+      extraExpenses: "0",
+      extraCardPayments: "0",
+      note: ""
+    });
+  }
+
+  async function moveDueDay(event: TimelineEvent, nextDay: number) {
+    const selectedMonth = data?.timeline?.month || data?.selectedMonth || "";
+    if (!selectedMonth) {
+      return;
+    }
+    if (!event.editableDueDay || !event.sourceType || !event.sourceId) {
+      setCalendarMessage("This timeline item cannot be moved.");
+      return;
+    }
+    if (event.day === nextDay) {
+      return;
+    }
+    if (
+      !["cardAccount", "houseBill", "shoppingItem", "myBill", "monthlyAdjustment"].includes(
+        event.sourceType
+      )
+    ) {
+      setCalendarMessage("This timeline item cannot be moved.");
+      return;
+    }
+
+    setCalendarMessage(null);
+    try {
+      await authedRequest(getIdToken, "/api/calendar/due-day", {
+        method: "POST",
+        body: JSON.stringify({
+          month: selectedMonth,
+          sourceType: event.sourceType,
+          sourceId: event.sourceId,
+          dueDayOfMonth: nextDay
+        })
+      });
+      setCalendarMessage(`${event.title} moved to day ${nextDay}.`);
+      await refetch();
+    } catch (requestError) {
+      setCalendarMessage(formatApiClientError(requestError, "Failed to move due day."));
+    }
+  }
+
   return (
     <ProtectedPage title="Dashboard">
       <div className="space-y-4">
@@ -666,6 +936,14 @@ export default function DashboardPage() {
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <Metric label="Income" value={formatGBP(data.snapshot.incomeTotal)} />
                 <Metric label="Money In Bank" value={formatGBP(data.snapshot.moneyInBank)} />
+                <Metric
+                  label="Bank Accounts (Closing)"
+                  value={formatGBP(
+                    data.bankAccountProjection?.entries?.length
+                      ? data.bankAccountProjection.totalClosingBalance
+                      : data.snapshot.moneyInBank
+                  )}
+                />
                 <Metric
                   label="Loaned Out (Outstanding)"
                   value={formatGBP(data.snapshot.loanedOutOutstandingTotal)}
@@ -710,6 +988,26 @@ export default function DashboardPage() {
                   {data.snapshot.inferred ? " (inferred month)" : ""}
                 </p>
               </div>
+
+              {data.bankAccountProjection?.entries?.length ? (
+                <div className="panel p-4">
+                  <p className="label">Account Split ({formatMonthKeyUK(data.bankAccountProjection.month)})</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {data.bankAccountProjection.entries.map((entry) => (
+                      <div key={`dashboard-account-${entry.accountId}`} className="rounded-xl border border-[var(--ring)] bg-white/75 p-3">
+                        <p className="text-sm font-semibold text-[var(--ink-main)]">{entry.name}</p>
+                        <p className="mt-1 text-xs text-[var(--ink-soft)] capitalize">{entry.accountType}</p>
+                        <p className="mt-2 text-base font-semibold text-[var(--ink-main)]">
+                          {formatGBP(entry.closingBalance)}
+                        </p>
+                        <p className="text-xs text-[var(--ink-soft)]">
+                          Change: {formatGBP(entry.netChange)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             !isLoading && <p className="text-sm text-[var(--ink-soft)]">No snapshot data yet. Import workbook first.</p>
@@ -803,6 +1101,150 @@ export default function DashboardPage() {
             </div>
           ) : (
             <p className="text-sm text-[var(--ink-soft)]">Planning insights will appear after monthly data loads.</p>
+          )}
+        </SectionPanel>
+
+        <SectionPanel
+          title="Scenario Mode (Sandbox)"
+          subtitle="Run what-if changes without writing live data. Use this to test extra income, expenses, or debt payments."
+          right={
+            <button type="button" className="button-secondary" onClick={() => clearScenario()}>
+              Clear scenario
+            </button>
+          }
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label className="block">
+              <span className="label">Extra income (GBP)</span>
+              <input
+                className="input mt-1"
+                type="number"
+                step="0.01"
+                value={scenarioDraft.extraIncome}
+                onChange={(event) =>
+                  setScenarioDraft((prev) => ({
+                    ...prev,
+                    extraIncome: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="block">
+              <span className="label">Extra expenses (GBP)</span>
+              <input
+                className="input mt-1"
+                type="number"
+                step="0.01"
+                value={scenarioDraft.extraExpenses}
+                onChange={(event) =>
+                  setScenarioDraft((prev) => ({
+                    ...prev,
+                    extraExpenses: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="block">
+              <span className="label">Extra card payments (GBP)</span>
+              <input
+                className="input mt-1"
+                type="number"
+                step="0.01"
+                value={scenarioDraft.extraCardPayments}
+                onChange={(event) =>
+                  setScenarioDraft((prev) => ({
+                    ...prev,
+                    extraCardPayments: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="block">
+              <span className="label">Scenario note</span>
+              <input
+                className="input mt-1"
+                value={scenarioDraft.note}
+                onChange={(event) =>
+                  setScenarioDraft((prev) => ({
+                    ...prev,
+                    note: event.target.value
+                  }))
+                }
+                placeholder="Optional"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3">
+            <button
+              type="button"
+              className="button-primary w-full sm:w-auto"
+              onClick={() => runScenario()}
+              disabled={scenarioBusy}
+            >
+              {scenarioBusy ? "Running..." : "Run scenario"}
+            </button>
+          </div>
+
+          {scenarioMessage ? <p className="mt-2 text-sm text-[var(--accent-strong)]">{scenarioMessage}</p> : null}
+
+          {scenarioResult ? (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Metric label="Money Left (Projected)" value={formatGBP(scenarioResult.projected.moneyLeft)} />
+              <Metric label="Money In Bank (Projected)" value={formatGBP(scenarioResult.projected.moneyInBank)} />
+              <Metric label="Card Balance (Projected)" value={formatGBP(scenarioResult.projected.cardBalanceTotal)} />
+              <Metric label="Net Worth (Projected)" value={formatGBP(scenarioResult.projected.netWorth)} />
+            </div>
+          ) : null}
+        </SectionPanel>
+
+        <SectionPanel
+          title="Subscription Intelligence"
+          subtitle="Recurring monthly cost ranking with lower-cost swap ideas."
+        >
+          {data?.subscriptionIntelligence ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="panel p-3">
+                <p className="label">Top recurring costs</p>
+                <div className="mt-2 space-y-2">
+                  {data.subscriptionIntelligence.ranked.slice(0, 8).map((entry) => (
+                    <div key={`sub-rank-${entry.id}`} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--ring)] bg-white/70 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[var(--ink-main)]">
+                          {entry.rank}. {entry.name}
+                        </p>
+                        <p className="text-xs text-[var(--ink-soft)]">{entry.sourceCollection}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-[var(--ink-main)]">{formatGBP(entry.monthlyAmount)}</p>
+                        <p className="text-xs text-[var(--ink-soft)]">{formatGBP(entry.annualAmount)}/yr</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="panel p-3">
+                <p className="label">Swap suggestions</p>
+                {data.subscriptionIntelligence.suggestions.length > 0 ? (
+                  <div className="mt-2 space-y-2">
+                    {data.subscriptionIntelligence.suggestions.map((suggestion) => (
+                      <div key={`sub-suggestion-${suggestion.id}`} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                        <p className="font-semibold">{suggestion.name}</p>
+                        <p>
+                          {formatGBP(suggestion.currentMonthly)} {"->"} {formatGBP(suggestion.suggestedMonthly)} / month
+                        </p>
+                        <p>Potential annual saving: {formatGBP(suggestion.potentialAnnualSavings)}</p>
+                        <p className="text-xs">{suggestion.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-[var(--ink-soft)]">No high-confidence savings suggestions right now.</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--ink-soft)]">Subscription intelligence not available yet.</p>
           )}
         </SectionPanel>
 
@@ -1243,8 +1685,8 @@ export default function DashboardPage() {
             data?.timeline?.month || data?.selectedMonth
               ? `UK calendar view for ${formatMonthKeyUK(
                   data?.timeline?.month || data?.selectedMonth || ""
-                )}. Includes income pay dates, card due dates, bills, and adjustments.`
-              : "UK calendar view of income pay dates, card due dates, bills, and adjustments."
+                )}. Includes income pay dates, card due dates, bills, transfers, and adjustments. Drag due chips to move due day.`
+              : "UK calendar view of income pay dates, card due dates, bills, transfers, and adjustments."
           }
         >
           {calendarWeeks.length === 0 ? (
@@ -1263,9 +1705,28 @@ export default function DashboardPage() {
                 <div className="calendar-heavy">
                   {heavyWeeks.map((week) => (
                     <span key={`heavy-week-${week.index}`} className="calendar-heavy-chip">
-                      Heavy week {week.index + 1}: {formatGBP(week.totalOutgoings)} outgoings
+                      Heavy week {week.index + 1}: {formatGBP(week.pressure)} pressure
                     </span>
                   ))}
+                </div>
+              ) : null}
+
+              {weekPressure.length > 0 ? (
+                <div className="calendar-heatmap">
+                  {weekPressure.map((week) => {
+                    const maxPressure = Math.max(...weekPressure.map((entry) => entry.pressure), 1);
+                    const ratio = week.pressure <= 0 ? 0 : Math.min(1, week.pressure / maxPressure);
+                    const width = `${Math.round(ratio * 100)}%`;
+                    return (
+                      <div key={`week-pressure-${week.index}`} className="calendar-heatmap-row">
+                        <p className="calendar-heatmap-label">Week {week.index + 1}</p>
+                        <div className="calendar-heatmap-track">
+                          <div className="calendar-heatmap-fill" style={{ width }} />
+                        </div>
+                        <p className="calendar-heatmap-value">{formatGBP(week.pressure)}</p>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null}
 
@@ -1283,7 +1744,20 @@ export default function DashboardPage() {
                     {calendarWeeks.flat().map((cell, index) => (
                       <div
                         key={`calendar-cell-${index}`}
-                        className={`calendar-day ${cell.day ? "" : "is-empty"}`}
+                        className={`calendar-day ${cell.day ? dayPressureClass(cell.pressure, maxDayPressure) : "is-empty"}`}
+                        onDragOver={(event) => {
+                          if (cell.day && draggedTimelineEvent?.editableDueDay) {
+                            event.preventDefault();
+                          }
+                        }}
+                        onDrop={async (event) => {
+                          event.preventDefault();
+                          if (!cell.day || !draggedTimelineEvent) {
+                            return;
+                          }
+                          await moveDueDay(draggedTimelineEvent, cell.day);
+                          setDraggedTimelineEvent(null);
+                        }}
                       >
                         {cell.day ? (
                           <>
@@ -1295,9 +1769,18 @@ export default function DashboardPage() {
                             </div>
                             <div className="calendar-day-events">
                               {cell.events.slice(0, 3).map((event) => (
-                                <div key={event.id} className={timelineChipClass(event.type)}>
+                                <div
+                                  key={event.id}
+                                  className={`${timelineChipClass(event.type)} ${event.editableDueDay ? "is-draggable" : ""}`}
+                                  draggable={Boolean(event.editableDueDay)}
+                                  onDragStart={() => setDraggedTimelineEvent(event)}
+                                  onDragEnd={() => setDraggedTimelineEvent(null)}
+                                  title={event.editableDueDay ? "Drag to another day to update due day" : undefined}
+                                >
                                   <p className="truncate font-medium">{event.title}</p>
-                                  {event.amount !== 0 ? <p className="truncate opacity-90">{formatGBP(event.amount)}</p> : null}
+                                  {eventAmountLabel(event) ? (
+                                    <p className="truncate opacity-90">{eventAmountLabel(event)}</p>
+                                  ) : null}
                                 </div>
                               ))}
                               {cell.events.length > 3 ? (
@@ -1311,6 +1794,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
               </div>
+              {calendarMessage ? <p className="text-sm text-[var(--accent-strong)]">{calendarMessage}</p> : null}
             </div>
           )}
         </SectionPanel>

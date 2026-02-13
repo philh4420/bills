@@ -184,6 +184,31 @@ export interface BankBalance {
   updatedAt: string;
 }
 
+export type BankAccountType = "current" | "savings" | "cash";
+
+export interface BankAccount {
+  id: string;
+  name: string;
+  accountType: BankAccountType;
+  balance: number;
+  includeInNetWorth: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BankTransfer {
+  id: string;
+  month: MonthKey;
+  day: number;
+  date: string; // YYYY-MM-DD
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type SavingsGoalStatus = "active" | "paused" | "completed";
 
 export interface SavingsGoal {
@@ -365,6 +390,15 @@ export interface DashboardResponse {
   cards: CardAccount[];
   monthlyPayments: MonthlyCardPayments | null;
   bankBalance: BankBalance | null;
+  bankAccounts?: BankAccount[];
+  bankTransfers?: BankTransfer[];
+  bankAccountProjection?: {
+    month: MonthKey;
+    entries: BankAccountProjection[];
+    totalOpeningBalance: number;
+    totalClosingBalance: number;
+    netMovementApplied: number;
+  };
   loanedOutItems: LoanedOutItem[];
   ledgerEntries: LedgerEntry[];
   monthClosure: MonthClosure | null;
@@ -429,7 +463,16 @@ export interface AlertStateRecord {
   updatedAt: string;
 }
 
-export type TimelineEventType = "card-due" | "bill-due" | "adjustment";
+export type TimelineEventType = "card-due" | "bill-due" | "adjustment" | "transfer";
+export type TimelineEventSourceType =
+  | "cardAccount"
+  | "houseBill"
+  | "shoppingItem"
+  | "myBill"
+  | "monthlyAdjustment"
+  | "incomeItem"
+  | "loanedOutItem"
+  | "bankTransfer";
 
 export interface MonthTimelineEvent {
   id: string;
@@ -440,6 +483,10 @@ export interface MonthTimelineEvent {
   day: number;
   amount: number; // debit is negative, credit is positive
   category: string;
+  sourceType?: TimelineEventSourceType;
+  sourceId?: string;
+  editableDueDay?: boolean;
+  transferAmount?: number;
 }
 
 export interface MonthTimeline {
@@ -496,6 +543,41 @@ export interface NetWorthSummary {
   monthDelta: number;
 }
 
+export interface BankAccountProjection {
+  accountId: string;
+  name: string;
+  accountType: BankAccountType;
+  includeInNetWorth: boolean;
+  openingBalance: number;
+  closingBalance: number;
+  netChange: number;
+}
+
+export interface SubscriptionCostEntry {
+  id: string;
+  sourceCollection: "houseBills" | "myBills" | "shoppingItems";
+  name: string;
+  monthlyAmount: number;
+  annualAmount: number;
+  rank: number;
+}
+
+export interface SubscriptionSwapSuggestion {
+  id: string;
+  name: string;
+  currentMonthly: number;
+  suggestedMonthly: number;
+  potentialMonthlySavings: number;
+  potentialAnnualSavings: number;
+  reason: string;
+}
+
+export interface SubscriptionIntelligenceSummary {
+  month: MonthKey;
+  ranked: SubscriptionCostEntry[];
+  suggestions: SubscriptionSwapSuggestion[];
+}
+
 export interface AnalyticsCategoryDelta {
   key:
     | "income"
@@ -537,4 +619,5 @@ export interface PlanningSummary {
   debtPayoff: DebtPayoffSummary;
   netWorth: NetWorthSummary;
   analytics: AnalyticsSummary;
+  subscriptionIntelligence: SubscriptionIntelligenceSummary;
 }

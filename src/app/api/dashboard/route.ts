@@ -13,10 +13,14 @@ import { buildMonthTimeline } from "@/lib/dashboard/timeline";
 import { computeCardMonthProjections, computeMonthSnapshots, extendMonthlyPaymentsToYearEnd } from "@/lib/formulas/engine";
 import { sumLedgerMovement } from "@/lib/ledger/engine";
 import { buildPlanningSummary } from "@/lib/planning/engine";
+import { buildSubscriptionIntelligence } from "@/lib/subscriptions/intelligence";
+import { buildBankAccountProjectionForMonth, sumBankAccountBalances } from "@/lib/bank/accounts";
 import {
   getAlertSettings,
   getBankBalance,
   getPaydayModeSettings,
+  listBankAccounts,
+  listBankTransfers,
   listCardAccounts,
   listLedgerEntries,
   listLoanedOutItems,
@@ -56,6 +60,8 @@ export async function GET(request: NextRequest) {
       paydayModeSettings,
       loanedOutItems,
       bankBalance,
+      bankAccounts,
+      bankTransfers,
       savingsGoals,
       persistedAlertSettings,
       alertStates,
@@ -73,6 +79,8 @@ export async function GET(request: NextRequest) {
       getPaydayModeSettings(uid),
       listLoanedOutItems(uid),
       getBankBalance(uid),
+      listBankAccounts(uid),
+      listBankTransfers(uid),
       listSavingsGoals(uid),
       getAlertSettings(uid),
       listAlertStates(uid),
@@ -96,7 +104,7 @@ export async function GET(request: NextRequest) {
       incomePaydays: monthlyIncomePaydays,
       paydayModeSettings,
       loanedOutItems,
-      baseBankBalance: bankBalance?.amount ?? 0
+      baseBankBalance: bankAccounts.length > 0 ? sumBankAccountBalances(bankAccounts) : bankBalance?.amount ?? 0
     });
 
     const availableMonths = snapshots.map((snapshot) => snapshot.month);
@@ -128,6 +136,16 @@ export async function GET(request: NextRequest) {
         )
       : {};
 
+    const bankAccountProjection = buildBankAccountProjectionForMonth({
+      month: selectedMonth,
+      accounts: bankAccounts,
+      transfers: bankTransfers,
+      snapshots
+    });
+    const bankAccountNameById = Object.fromEntries(
+      bankAccounts.map((account) => [account.id, account.name])
+    );
+
     const timeline = buildMonthTimeline({
       selectedMonth,
       cards,
@@ -140,13 +158,16 @@ export async function GET(request: NextRequest) {
       shopping,
       myBills,
       adjustments,
-      loanedOutItems
+      loanedOutItems,
+      bankTransfers,
+      bankAccountNameById
     });
     const ledgerEntries = await listLedgerEntries(uid, selectedMonth);
 
     const selectedIndex = snapshots.findIndex((entry) => entry.month === selectedMonth);
     const openingBankBalance =
-      selectedIndex > 0 ? snapshots[selectedIndex - 1].moneyInBank : bankBalance?.amount ?? 0;
+      bankAccountProjection.totalOpeningBalance ||
+      (selectedIndex > 0 ? snapshots[selectedIndex - 1].moneyInBank : bankBalance?.amount ?? 0);
     const [yearRaw, monthRaw] = selectedMonth.split("-");
     const selectedYear = Number.parseInt(yearRaw || "", 10);
     const selectedMonthNumber = Number.parseInt(monthRaw || "", 10);
@@ -201,6 +222,12 @@ export async function GET(request: NextRequest) {
 
     const selectedIncomePaydayOverridesByIncomeId =
       monthlyIncomePaydays.find((entry) => entry.month === selectedMonth)?.byIncomeId || {};
+    const subscriptionIntelligence = buildSubscriptionIntelligence({
+      month: selectedMonth,
+      houseBills,
+      myBills,
+      shopping
+    });
     const planning = buildPlanningSummary({
       selectedMonth,
       snapshots,
@@ -209,6 +236,9 @@ export async function GET(request: NextRequest) {
       selectedMonthlyPayment,
       selectedProjectionByCardId: selectedProjection?.entries || {},
       income,
+      houseBills,
+      shopping,
+      myBills,
       selectedIncomePaydayOverridesByIncomeId,
       paydayModeSettings,
       savingsGoals
@@ -221,6 +251,9 @@ export async function GET(request: NextRequest) {
       cards,
       monthlyPayments: selectedMonthlyPayment,
       bankBalance,
+      bankAccounts,
+      bankTransfers,
+      bankAccountProjection,
       loanedOutItems,
       ledgerEntries,
       monthClosure,
@@ -234,6 +267,7 @@ export async function GET(request: NextRequest) {
       alertSettings,
       alerts: activeAlerts,
       timeline,
+      subscriptionIntelligence,
       planning
     });
   });

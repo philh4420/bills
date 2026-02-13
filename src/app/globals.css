@@ -272,6 +272,21 @@ tbody tr:last-child td {
   flex-direction: column;
 }
 
+.calendar-day.is-pressure-low {
+  border-color: rgba(215, 139, 86, 0.35);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 241, 226, 0.72));
+}
+
+.calendar-day.is-pressure-medium {
+  border-color: rgba(215, 139, 86, 0.5);
+  background: linear-gradient(180deg, rgba(255, 254, 250, 0.88), rgba(255, 231, 198, 0.78));
+}
+
+.calendar-day.is-pressure-high {
+  border-color: rgba(185, 74, 52, 0.45);
+  background: linear-gradient(180deg, rgba(255, 250, 248, 0.9), rgba(255, 218, 210, 0.82));
+}
+
 .calendar-day.is-empty {
   border-color: transparent;
   background: transparent;
@@ -311,6 +326,14 @@ tbody tr:last-child td {
   border: 1px solid transparent;
 }
 
+.calendar-event.is-draggable {
+  cursor: grab;
+}
+
+.calendar-event.is-draggable:active {
+  cursor: grabbing;
+}
+
 .calendar-event.card-due {
   border-color: rgba(15, 125, 111, 0.35);
   background: rgba(15, 125, 111, 0.12);
@@ -329,9 +352,60 @@ tbody tr:last-child td {
   color: #1f3a7b;
 }
 
+.calendar-event.transfer {
+  border-color: rgba(89, 102, 124, 0.28);
+  background: rgba(89, 102, 124, 0.12);
+  color: #2f3f56;
+}
+
 .calendar-more {
   font-size: 0.66rem;
   color: var(--ink-soft);
+}
+
+.calendar-heatmap {
+  border: 1px solid rgba(184, 171, 150, 0.38);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.66);
+  padding: 0.55rem;
+  display: grid;
+  gap: 0.42rem;
+}
+
+.calendar-heatmap-row {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 76px minmax(0, 1fr) 90px;
+  align-items: center;
+}
+
+.calendar-heatmap-label {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.calendar-heatmap-track {
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(184, 171, 150, 0.4);
+  background: linear-gradient(90deg, rgba(15, 125, 111, 0.14), rgba(185, 74, 52, 0.12));
+  overflow: hidden;
+}
+
+.calendar-heatmap-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(15, 125, 111, 0.8), rgba(185, 74, 52, 0.72));
+  min-width: 2px;
+}
+
+.calendar-heatmap-value {
+  text-align: right;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-main);
 }
 
 .mobile-edit-card {
@@ -436,5 +510,16 @@ tbody tr:last-child td {
   .mobile-edit-drawer {
     align-items: center;
     padding: 1rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .calendar-heatmap-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .calendar-heatmap-value {
+    text-align: left;
   }
 }

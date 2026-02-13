@@ -8,6 +8,7 @@ import { ProtectedPage } from "@/components/protected-page";
 import { SectionPanel } from "@/components/section-panel";
 import { authedRequest, formatApiClientError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
+import { monthKeyInTimeZone } from "@/lib/util/dates";
 import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
 interface Item {
@@ -37,9 +38,23 @@ interface LoanedOutItem {
   paidBackMonth?: string;
 }
 
-interface BankBalanceRecord {
+interface BankAccountItem {
   id: string;
+  name: string;
+  accountType: "current" | "savings" | "cash";
+  balance: number;
+  includeInNetWorth: boolean;
+}
+
+interface BankTransferItem {
+  id: string;
+  month: string;
+  day: number;
+  date: string;
+  fromAccountId: string;
+  toAccountId: string;
   amount: number;
+  note?: string;
 }
 
 interface IncomePaydaysData {
@@ -2097,72 +2112,620 @@ function SavingsGoalsCollection({ getIdToken }: { getIdToken: () => Promise<stri
 }
 
 function BankBalanceSection({ getIdToken }: { getIdToken: () => Promise<string | null> }) {
-  const [amountDraft, setAmountDraft] = useState("0");
   const [message, setMessage] = useState<string | null>(null);
+  const [accountDrafts, setAccountDrafts] = useState<Record<string, BankAccountItem>>({});
+  const [newAccount, setNewAccount] = useState({
+    name: "",
+    accountType: "current" as BankAccountItem["accountType"],
+    balance: "0",
+    includeInNetWorth: true
+  });
+  const [transferDrafts, setTransferDrafts] = useState<Record<string, BankTransferItem>>({});
+  const [newTransfer, setNewTransfer] = useState({
+    month: monthKeyInTimeZone(),
+    day: "1",
+    fromAccountId: "",
+    toAccountId: "",
+    amount: "0",
+    note: ""
+  });
 
-  const query = useQuery({
-    queryKey: ["bank-balance"],
-    queryFn: () => authedRequest<{ bankBalance: BankBalanceRecord | null }>(getIdToken, "/api/bank-balance")
+  const accountsQuery = useQuery({
+    queryKey: ["bank-accounts"],
+    queryFn: () =>
+      authedRequest<{ accounts: BankAccountItem[]; totalBalance: number }>(getIdToken, "/api/bank-accounts")
+  });
+  const transfersQuery = useQuery({
+    queryKey: ["bank-transfers"],
+    queryFn: () => authedRequest<{ transfers: BankTransferItem[] }>(getIdToken, "/api/bank-transfers")
   });
 
   useEffect(() => {
-    const amount = query.data?.bankBalance?.amount ?? 0;
-    setAmountDraft(String(amount));
-  }, [query.data?.bankBalance?.amount]);
+    const next: Record<string, BankAccountItem> = {};
+    (accountsQuery.data?.accounts || []).forEach((account) => {
+      next[account.id] = account;
+    });
+    setAccountDrafts(next);
 
-  async function saveBankBalance() {
-    const amount = Number.parseFloat(amountDraft);
-    if (!Number.isFinite(amount)) {
-      setMessage("Amount must be a valid number.");
+    if (!newTransfer.fromAccountId && accountsQuery.data?.accounts?.[0]) {
+      const first = accountsQuery.data.accounts[0];
+      const second = accountsQuery.data.accounts[1];
+      setNewTransfer((prev) => ({
+        ...prev,
+        fromAccountId: first.id,
+        toAccountId: second?.id || ""
+      }));
+    }
+  }, [accountsQuery.data?.accounts, newTransfer.fromAccountId]);
+
+  useEffect(() => {
+    const next: Record<string, BankTransferItem> = {};
+    (transfersQuery.data?.transfers || []).forEach((transfer) => {
+      next[transfer.id] = transfer;
+    });
+    setTransferDrafts(next);
+  }, [transfersQuery.data?.transfers]);
+
+  async function refreshAll() {
+    await Promise.all([accountsQuery.refetch(), transfersQuery.refetch()]);
+  }
+
+  async function addAccount() {
+    if (!newAccount.name.trim()) {
+      setMessage("Account name is required.");
+      return;
+    }
+    const balance = Number.parseFloat(newAccount.balance);
+    if (!Number.isFinite(balance)) {
+      setMessage("Account balance must be a valid number.");
       return;
     }
 
     setMessage(null);
     try {
-      await authedRequest(getIdToken, "/api/bank-balance", {
-        method: "PUT",
+      await authedRequest(getIdToken, "/api/bank-accounts", {
+        method: "POST",
         body: JSON.stringify({
-          amount
+          name: newAccount.name.trim(),
+          accountType: newAccount.accountType,
+          balance,
+          includeInNetWorth: newAccount.includeInNetWorth
         })
       });
-      setMessage("Saved bank balance");
-      await query.refetch();
+      setNewAccount({
+        name: "",
+        accountType: "current",
+        balance: "0",
+        includeInNetWorth: true
+      });
+      setMessage("Added bank account.");
+      await refreshAll();
     } catch (error) {
-      setMessage(formatApiClientError(error, "Failed to save bank balance"));
+      setMessage(formatApiClientError(error, "Failed to add bank account."));
     }
   }
 
-  const parsedDraftAmount = Number.parseFloat(amountDraft);
-  const currentDisplayAmount =
-    query.data?.bankBalance?.amount ?? (Number.isFinite(parsedDraftAmount) ? parsedDraftAmount : 0);
+  async function saveAccount(id: string) {
+    const draft = accountDrafts[id];
+    if (!draft) {
+      return;
+    }
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/bank-accounts/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: draft.name,
+          accountType: draft.accountType,
+          balance: draft.balance,
+          includeInNetWorth: draft.includeInNetWorth
+        })
+      });
+      setMessage("Saved account.");
+      await refreshAll();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to save account."));
+    }
+  }
+
+  async function deleteAccount(id: string) {
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/bank-accounts/${id}`, {
+        method: "DELETE"
+      });
+      setMessage("Deleted account.");
+      await refreshAll();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to delete account."));
+    }
+  }
+
+  async function addTransfer() {
+    const day = Number.parseInt(newTransfer.day, 10);
+    const amount = Number.parseFloat(newTransfer.amount);
+    if (!newTransfer.month || !/^\d{4}-(0[1-9]|1[0-2])$/.test(newTransfer.month)) {
+      setMessage("Transfer month must be YYYY-MM.");
+      return;
+    }
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      setMessage("Transfer day must be between 1 and 31.");
+      return;
+    }
+    if (!newTransfer.fromAccountId || !newTransfer.toAccountId) {
+      setMessage("Select both transfer accounts.");
+      return;
+    }
+    if (newTransfer.fromAccountId === newTransfer.toAccountId) {
+      setMessage("Transfer accounts must be different.");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setMessage("Transfer amount must be greater than 0.");
+      return;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, "/api/bank-transfers", {
+        method: "POST",
+        body: JSON.stringify({
+          month: newTransfer.month,
+          day,
+          fromAccountId: newTransfer.fromAccountId,
+          toAccountId: newTransfer.toAccountId,
+          amount,
+          note: newTransfer.note.trim() || undefined
+        })
+      });
+      setNewTransfer((prev) => ({
+        ...prev,
+        day: "1",
+        amount: "0",
+        note: ""
+      }));
+      setMessage("Added transfer.");
+      await refreshAll();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to add transfer."));
+    }
+  }
+
+  async function saveTransfer(id: string) {
+    const draft = transferDrafts[id];
+    if (!draft) {
+      return;
+    }
+
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/bank-transfers/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          month: draft.month,
+          day: draft.day,
+          fromAccountId: draft.fromAccountId,
+          toAccountId: draft.toAccountId,
+          amount: draft.amount,
+          note: draft.note || undefined
+        })
+      });
+      setMessage("Saved transfer.");
+      await refreshAll();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to save transfer."));
+    }
+  }
+
+  async function deleteTransfer(id: string) {
+    setMessage(null);
+    try {
+      await authedRequest(getIdToken, `/api/bank-transfers/${id}`, {
+        method: "DELETE"
+      });
+      setMessage("Deleted transfer.");
+      await refreshAll();
+    } catch (error) {
+      setMessage(formatApiClientError(error, "Failed to delete transfer."));
+    }
+  }
+
+  const accounts = accountsQuery.data?.accounts || [];
+  const transfers = transfersQuery.data?.transfers || [];
+  const totalBalance = accountsQuery.data?.totalBalance ?? 0;
 
   return (
     <SectionPanel
-      title="Money In Bank"
-      subtitle="Set your current bank amount. Dashboard money-in-bank uses this as the base balance."
-      right={
-        <p className="text-sm text-[var(--ink-soft)]">
-          Current: {formatGBP(currentDisplayAmount)}
-        </p>
-      }
+      title="Bank Accounts & Transfers"
+      subtitle="Use multiple accounts (current/savings/cash) and internal transfers. Dashboard totals aggregate all accounts."
+      right={<p className="text-sm text-[var(--ink-soft)]">Total: {formatGBP(totalBalance)}</p>}
     >
-      {query.isLoading ? <p className="text-sm text-[var(--ink-soft)]">Loading...</p> : null}
-      {query.error ? <p className="text-sm text-red-700">{(query.error as Error).message}</p> : null}
+      {accountsQuery.isLoading || transfersQuery.isLoading ? (
+        <p className="text-sm text-[var(--ink-soft)]">Loading...</p>
+      ) : null}
+      {accountsQuery.error ? <p className="text-sm text-red-700">{(accountsQuery.error as Error).message}</p> : null}
+      {transfersQuery.error ? <p className="text-sm text-red-700">{(transfersQuery.error as Error).message}</p> : null}
 
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <label className="block">
-          <span className="label">Bank balance (GBP)</span>
-          <input
-            className="input mt-1"
-            type="number"
-            step="0.01"
-            value={amountDraft}
-            onChange={(event) => setAmountDraft(event.target.value)}
-          />
-        </label>
-        <button className="button-primary w-full sm:w-auto" type="button" onClick={() => saveBankBalance()}>
-          Save balance
-        </button>
+      <p className="label">Bank Accounts</p>
+      <div className="table-wrap mt-2">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Balance</th>
+              <th>Net worth</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((account) => (
+              <tr key={`bank-account-${account.id}`}>
+                <td>
+                  <input
+                    className="input"
+                    value={accountDrafts[account.id]?.name || ""}
+                    onChange={(event) =>
+                      setAccountDrafts((prev) => ({
+                        ...prev,
+                        [account.id]: {
+                          ...prev[account.id],
+                          name: event.target.value
+                        }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    value={accountDrafts[account.id]?.accountType || "current"}
+                    onChange={(event) =>
+                      setAccountDrafts((prev) => ({
+                        ...prev,
+                        [account.id]: {
+                          ...prev[account.id],
+                          accountType: event.target.value as BankAccountItem["accountType"]
+                        }
+                      }))
+                    }
+                  >
+                    <option value="current">Current</option>
+                    <option value="savings">Savings</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </td>
+                <td>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={accountDrafts[account.id]?.balance ?? 0}
+                    onChange={(event) =>
+                      setAccountDrafts((prev) => ({
+                        ...prev,
+                        [account.id]: {
+                          ...prev[account.id],
+                          balance: Number(event.target.value)
+                        }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <label className="inline-flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                    <input
+                      type="checkbox"
+                      checked={accountDrafts[account.id]?.includeInNetWorth !== false}
+                      onChange={(event) =>
+                        setAccountDrafts((prev) => ({
+                          ...prev,
+                          [account.id]: {
+                            ...prev[account.id],
+                            includeInNetWorth: event.target.checked
+                          }
+                        }))
+                      }
+                    />
+                    Include
+                  </label>
+                </td>
+                <td>
+                  <div className="flex gap-2">
+                    <button className="button-secondary" type="button" onClick={() => saveAccount(account.id)}>
+                      Save
+                    </button>
+                    <button className="button-danger" type="button" onClick={() => deleteAccount(account.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td>
+                <input
+                  className="input"
+                  placeholder="New account"
+                  value={newAccount.name}
+                  onChange={(event) => setNewAccount((prev) => ({ ...prev, name: event.target.value }))}
+                />
+              </td>
+              <td>
+                <select
+                  className="input"
+                  value={newAccount.accountType}
+                  onChange={(event) =>
+                    setNewAccount((prev) => ({
+                      ...prev,
+                      accountType: event.target.value as BankAccountItem["accountType"]
+                    }))
+                  }
+                >
+                  <option value="current">Current</option>
+                  <option value="savings">Savings</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={newAccount.balance}
+                  onChange={(event) => setNewAccount((prev) => ({ ...prev, balance: event.target.value }))}
+                />
+              </td>
+              <td>
+                <label className="inline-flex items-center gap-2 text-sm text-[var(--ink-main)]">
+                  <input
+                    type="checkbox"
+                    checked={newAccount.includeInNetWorth}
+                    onChange={(event) =>
+                      setNewAccount((prev) => ({
+                        ...prev,
+                        includeInNetWorth: event.target.checked
+                      }))
+                    }
+                  />
+                  Include
+                </label>
+              </td>
+              <td>
+                <button className="button-primary" type="button" onClick={() => addAccount()}>
+                  Add
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="label mt-4">Internal Transfers</p>
+      <div className="table-wrap mt-2">
+        <table>
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Day</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Amount</th>
+              <th>Note</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {transfers.map((transfer) => (
+              <tr key={`bank-transfer-${transfer.id}`}>
+                <td>
+                  <input
+                    className="input"
+                    type="month"
+                    value={transferDrafts[transfer.id]?.month || transfer.month}
+                    onChange={(event) =>
+                      setTransferDrafts((prev) => ({
+                        ...prev,
+                        [transfer.id]: {
+                          ...prev[transfer.id],
+                          month: event.target.value
+                        }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    value={transferDrafts[transfer.id]?.day || transfer.day}
+                    onChange={(event) =>
+                      setTransferDrafts((prev) => ({
+                        ...prev,
+                        [transfer.id]: {
+                          ...prev[transfer.id],
+                          day: Number.parseInt(event.target.value, 10)
+                        }
+                      }))
+                    }
+                  >
+                    {DUE_DAY_OPTIONS.map((day) => (
+                      <option key={`transfer-day-${transfer.id}-${day}`} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    value={transferDrafts[transfer.id]?.fromAccountId || transfer.fromAccountId}
+                    onChange={(event) =>
+                      setTransferDrafts((prev) => ({
+                        ...prev,
+                        [transfer.id]: {
+                          ...prev[transfer.id],
+                          fromAccountId: event.target.value
+                        }
+                      }))
+                    }
+                  >
+                    {accounts.map((account) => (
+                      <option key={`transfer-from-${transfer.id}-${account.id}`} value={account.id}>
+                        {account.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    value={transferDrafts[transfer.id]?.toAccountId || transfer.toAccountId}
+                    onChange={(event) =>
+                      setTransferDrafts((prev) => ({
+                        ...prev,
+                        [transfer.id]: {
+                          ...prev[transfer.id],
+                          toAccountId: event.target.value
+                        }
+                      }))
+                    }
+                  >
+                    {accounts.map((account) => (
+                      <option key={`transfer-to-${transfer.id}-${account.id}`} value={account.id}>
+                        {account.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={transferDrafts[transfer.id]?.amount ?? transfer.amount}
+                    onChange={(event) =>
+                      setTransferDrafts((prev) => ({
+                        ...prev,
+                        [transfer.id]: {
+                          ...prev[transfer.id],
+                          amount: Number(event.target.value)
+                        }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="input"
+                    value={transferDrafts[transfer.id]?.note || ""}
+                    onChange={(event) =>
+                      setTransferDrafts((prev) => ({
+                        ...prev,
+                        [transfer.id]: {
+                          ...prev[transfer.id],
+                          note: event.target.value
+                        }
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <div className="flex gap-2">
+                    <button className="button-secondary" type="button" onClick={() => saveTransfer(transfer.id)}>
+                      Save
+                    </button>
+                    <button className="button-danger" type="button" onClick={() => deleteTransfer(transfer.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td>
+                <input
+                  className="input"
+                  type="month"
+                  value={newTransfer.month}
+                  onChange={(event) => setNewTransfer((prev) => ({ ...prev, month: event.target.value }))}
+                />
+              </td>
+              <td>
+                <select
+                  className="input"
+                  value={newTransfer.day}
+                  onChange={(event) => setNewTransfer((prev) => ({ ...prev, day: event.target.value }))}
+                >
+                  {DUE_DAY_OPTIONS.map((day) => (
+                    <option key={`transfer-new-day-${day}`} value={day}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <select
+                  className="input"
+                  value={newTransfer.fromAccountId}
+                  onChange={(event) =>
+                    setNewTransfer((prev) => ({
+                      ...prev,
+                      fromAccountId: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">From account</option>
+                  {accounts.map((account) => (
+                    <option key={`transfer-new-from-${account.id}`} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <select
+                  className="input"
+                  value={newTransfer.toAccountId}
+                  onChange={(event) =>
+                    setNewTransfer((prev) => ({
+                      ...prev,
+                      toAccountId: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">To account</option>
+                  {accounts.map((account) => (
+                    <option key={`transfer-new-to-${account.id}`} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={newTransfer.amount}
+                  onChange={(event) => setNewTransfer((prev) => ({ ...prev, amount: event.target.value }))}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  value={newTransfer.note}
+                  placeholder="Optional"
+                  onChange={(event) => setNewTransfer((prev) => ({ ...prev, note: event.target.value }))}
+                />
+              </td>
+              <td>
+                <button className="button-primary" type="button" onClick={() => addTransfer()}>
+                  Add
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {message ? <p className="mt-2 text-sm text-[var(--accent-strong)]">{message}</p> : null}
