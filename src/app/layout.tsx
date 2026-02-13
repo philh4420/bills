@@ -32,10 +32,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
-        <PwaRegister />
-        <Providers>{children}</Providers>
-      </body>
+      <body suppressHydrationWarning><PwaRegister /><Providers>{children}</Providers></body>
     </html>
   );
 }

@@ -1157,7 +1157,7 @@ export default function CardsPage() {
           </div>
 
           <div className="table-wrap hidden xl:block">
-            <table className="w-full table-fixed">
+            <table className="finance-table finance-table-cards w-full table-fixed">
               <colgroup>
                 <col style={{ width: "13%" }} />
                 <col style={{ width: "9%" }} />
@@ -1192,7 +1192,7 @@ export default function CardsPage() {
                   const dueMeta = getDueMeta(draft.dueDayOfMonth);
                   return (
                     <tr key={card.id}>
-                      <td>{card.name}</td>
+                      <td className="font-semibold text-[var(--ink-main)]">{card.name}</td>
                       <td>
                         <input
                           className="input w-full"
@@ -1267,7 +1267,7 @@ export default function CardsPage() {
                           <p className="text-xs text-[var(--ink-soft)]">{dueMeta.detailLabel}</p>
                         </div>
                       </td>
-                      <td className="whitespace-nowrap">{formatGBP(available)}</td>
+                      <td className="whitespace-nowrap font-semibold text-[var(--ink-main)]">{formatGBP(available)}</td>
                       <td className="whitespace-nowrap">{formatGBP(projection?.interestAdded ?? 0)}</td>
                       <td className="whitespace-nowrap">{formatGBP(projection?.closingBalance ?? draft.usedLimit)}</td>
                       <td>
@@ -1284,7 +1284,7 @@ export default function CardsPage() {
 
           <p className="label hidden xl:block">Statement cycle rules</p>
           <div className="table-wrap hidden xl:block">
-            <table>
+            <table className="finance-table">
               <thead>
                 <tr>
                   <th>Card</th>

@@ -272,11 +272,16 @@ button {
   letter-spacing: 0.01em;
 }
 
+.metric-card {
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(245, 250, 255, 0.76));
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid rgba(118, 143, 182, 0.24);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.5);
 }
 
 table {
@@ -287,30 +292,100 @@ table {
 th,
 td {
   text-align: left;
-  padding: 0.67rem 0.62rem;
+  padding: 0.6rem 0.56rem;
   border-bottom: 1px solid rgba(118, 143, 182, 0.28);
-  font-size: 0.91rem;
+  font-size: 0.88rem;
   vertical-align: middle;
 }
 
 th {
-  font-size: 0.75rem;
+  font-size: 0.71rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--ink-soft);
-  font-weight: 700;
+  font-weight: 800;
+  background: rgba(243, 248, 255, 0.94);
+  border-bottom: 1px solid rgba(118, 143, 182, 0.36);
 }
 
 tbody tr {
   transition: background 0.15s ease;
 }
 
+tbody tr:nth-child(even) {
+  background: rgba(250, 253, 255, 0.62);
+}
+
 tbody tr:hover {
-  background: rgba(31, 92, 199, 0.06);
+  background: rgba(31, 92, 199, 0.08);
 }
 
 tbody tr:last-child td {
   border-bottom: none;
+}
+
+.finance-table {
+  min-width: 760px;
+}
+
+.finance-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  backdrop-filter: blur(10px);
+}
+
+.finance-table td {
+  line-height: 1.25;
+}
+
+.finance-table .input {
+  min-height: 38px;
+  padding: 0.46rem 0.6rem;
+  border-radius: 11px;
+}
+
+.finance-table .button-secondary,
+.finance-table .button-danger,
+.finance-table .button-primary {
+  padding: 0.42rem 0.72rem;
+  border-radius: 11px;
+  font-size: 0.84rem;
+}
+
+.finance-table td:nth-last-child(-n + 3),
+.finance-table th:nth-last-child(-n + 3) {
+  white-space: nowrap;
+}
+
+.finance-table-cards td:nth-child(2),
+.finance-table-cards td:nth-child(3),
+.finance-table-cards td:nth-child(4),
+.finance-table-cards td:nth-child(7),
+.finance-table-cards td:nth-child(8),
+.finance-table-cards td:nth-child(9) {
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-more-menu {
+  width: min(78vw, 240px);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.nav-more-menu a + a {
+  margin-top: 0.28rem;
+}
+
+.compact-nav > .tab-idle,
+.compact-nav > .tab-active,
+.compact-nav > .relative > button {
+  min-height: 40px;
+}
+
+.compact-nav .tab-idle,
+.compact-nav .tab-active {
+  padding-inline: 0.58rem;
 }
 
 .calendar-heavy {

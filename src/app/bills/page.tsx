@@ -524,7 +524,7 @@ function LineItemCollection({
       </div>
 
       <div className="table-wrap hidden xl:block">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -956,7 +956,7 @@ function MonthlyIncomePaydaysCollection({ getIdToken }: { getIdToken: () => Prom
       </div>
 
       <div className="table-wrap hidden xl:block">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -1447,7 +1447,7 @@ function ExtraIncomeCollection({ getIdToken }: { getIdToken: () => Promise<strin
       </div>
 
       <div className="table-wrap hidden xl:block">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -1900,7 +1900,7 @@ function SavingsGoalsCollection({ getIdToken }: { getIdToken: () => Promise<stri
       </div>
 
       <div className="table-wrap hidden xl:block">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -2348,7 +2348,7 @@ function BankBalanceSection({ getIdToken }: { getIdToken: () => Promise<string |
 
       <p className="label">Bank Accounts</p>
       <div className="table-wrap mt-2">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -2503,7 +2503,7 @@ function BankBalanceSection({ getIdToken }: { getIdToken: () => Promise<string |
 
       <p className="label mt-4">Internal Transfers</p>
       <div className="table-wrap mt-2">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Month</th>
@@ -3186,7 +3186,7 @@ function LoanedOutCollection({ getIdToken }: { getIdToken: () => Promise<string 
       </div>
 
       <div className="table-wrap hidden xl:block">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -3810,7 +3810,7 @@ function MonthlyAdjustmentsCollection({ getIdToken }: { getIdToken: () => Promis
       </div>
 
       <div className="table-wrap hidden xl:block">
-        <table>
+        <table className="finance-table">
           <thead>
             <tr>
               <th>Name</th>

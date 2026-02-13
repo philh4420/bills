@@ -334,9 +334,9 @@ const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="panel p-4">
+    <div className="panel metric-card p-3.5 sm:p-4">
       <p className="label">{label}</p>
-      <p className="metric-value mt-2">{value}</p>
+      <p className="metric-value mt-1.5">{value}</p>
     </div>
   );
 }
@@ -956,7 +956,7 @@ export default function DashboardPage() {
 
           {data?.snapshot ? (
             <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                 <Metric label="Income" value={formatGBP(data.snapshot.incomeTotal)} />
                 <Metric label="Money In Bank" value={formatGBP(data.snapshot.moneyInBank)} />
                 <Metric
@@ -1015,7 +1015,7 @@ export default function DashboardPage() {
               {data.bankAccountProjection?.entries?.length ? (
                 <div className="panel p-4">
                   <p className="label">Account Split ({formatMonthKeyUK(data.bankAccountProjection.month)})</p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="mt-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                     {data.bankAccountProjection.entries.map((entry) => (
                       <div key={`dashboard-account-${entry.accountId}`} className="rounded-xl border border-[var(--ring)] bg-white/75 p-3">
                         <p className="text-sm font-semibold text-[var(--ink-main)]">{entry.name}</p>
@@ -1048,7 +1048,7 @@ export default function DashboardPage() {
         >
           {data?.planning ? (
             <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                 <Metric
                   label="Payday Mode"
                   value={data.planning.paydayMode.enabled ? `Every ${data.planning.paydayMode.cycleDays} days` : "Off"}
@@ -1530,44 +1530,44 @@ export default function DashboardPage() {
           {settingsMessage ? <p className="mt-3 text-sm text-[var(--accent-strong)]">{settingsMessage}</p> : null}
 
           {(data?.alerts || []).length > 0 ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="mt-4 grid gap-2.5 md:grid-cols-2">
               {data?.alerts.map((alert) => (
-                <div className="panel p-4" key={alert.id}>
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold text-[var(--ink-main)]">{alert.title}</p>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${severityClass(alert.severity)}`}>
-                    {alert.severity}
-                  </span>
+                <div className="panel p-3.5" key={alert.id}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-[var(--ink-main)]">{alert.title}</p>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${severityClass(alert.severity)}`}>
+                      {alert.severity}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-[var(--ink-soft)]">{alert.message}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      disabled={alertActionBusyId === `${alert.id}:ack`}
+                      onClick={() => acknowledgeAlert(alert.id)}
+                    >
+                      {alertActionBusyId === `${alert.id}:ack` ? "..." : "Acknowledge"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      disabled={alertActionBusyId === `${alert.id}:snooze`}
+                      onClick={() => snoozeAlert(alert.id, 24 * 60)}
+                    >
+                      {alertActionBusyId === `${alert.id}:snooze` ? "..." : "Snooze 24h"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button-danger"
+                      disabled={alertActionBusyId === `${alert.id}:mute`}
+                      onClick={() => muteAlert(alert.id)}
+                    >
+                      {alertActionBusyId === `${alert.id}:mute` ? "..." : "Mute"}
+                    </button>
+                  </div>
                 </div>
-                <p className="mt-2 text-sm text-[var(--ink-soft)]">{alert.message}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    disabled={alertActionBusyId === `${alert.id}:ack`}
-                    onClick={() => acknowledgeAlert(alert.id)}
-                  >
-                    {alertActionBusyId === `${alert.id}:ack` ? "..." : "Acknowledge"}
-                  </button>
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    disabled={alertActionBusyId === `${alert.id}:snooze`}
-                    onClick={() => snoozeAlert(alert.id, 24 * 60)}
-                  >
-                    {alertActionBusyId === `${alert.id}:snooze` ? "..." : "Snooze 24h"}
-                  </button>
-                  <button
-                    type="button"
-                    className="button-danger"
-                    disabled={alertActionBusyId === `${alert.id}:mute`}
-                    onClick={() => muteAlert(alert.id)}
-                  >
-                    {alertActionBusyId === `${alert.id}:mute` ? "..." : "Mute"}
-                  </button>
-                </div>
-              </div>
-            ))}
+              ))}
             </div>
           ) : (
             <p className="mt-3 text-sm text-[var(--ink-soft)]">No active alerts for the current settings.</p>

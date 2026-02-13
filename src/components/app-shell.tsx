@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/lib/auth/client";
 import { SyncStatus } from "@/components/sync-status";
@@ -19,8 +19,56 @@ const NAV = [
 ] as const;
 
 export function AppShell({ title, children }: { title: string; children: ReactNode }) {
-  const pathname = usePathname();
+  const rawPathname = usePathname();
+  const [pathname, setPathname] = useState("");
   const { user, signOut } = useAuth();
+  const [compactMoreOpen, setCompactMoreOpen] = useState(false);
+  const compactMoreRef = useRef<HTMLDivElement | null>(null);
+
+  const compactPrimary = useMemo(
+    () =>
+      NAV.filter((item) =>
+        ["/dashboard", "/bills", "/cards"].includes(item.href)
+      ),
+    []
+  );
+  const compactMore = useMemo(
+    () => NAV.filter((item) => !compactPrimary.some((primary) => primary.href === item.href)),
+    [compactPrimary]
+  );
+  const compactMoreActive = compactMore.some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+  );
+
+  useEffect(() => {
+    if (rawPathname) {
+      setPathname(rawPathname);
+    }
+  }, [rawPathname]);
+
+  useEffect(() => {
+    setCompactMoreOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!compactMoreOpen) {
+      return;
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!compactMoreRef.current) {
+        return;
+      }
+      if (!compactMoreRef.current.contains(event.target as Node)) {
+        setCompactMoreOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [compactMoreOpen]);
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)] text-[var(--ink-main)]">
@@ -76,7 +124,52 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
               </div>
             </div>
 
-            <nav className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:flex lg:flex-wrap 2xl:hidden">
+            <nav className="compact-nav mt-4 flex items-center gap-2 min-[480px]:hidden 2xl:hidden">
+              {compactPrimary.map((item) => {
+                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={`compact-${item.href}`}
+                    href={item.href}
+                    className={`${active ? "tab-active" : "tab-idle"} min-w-[0] flex-1 text-center text-[0.8rem]`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+              <div className="relative" ref={compactMoreRef}>
+                <button
+                  type="button"
+                  className={`${compactMoreActive ? "tab-active" : "tab-idle"} min-w-[86px]`}
+                  onClick={() => setCompactMoreOpen((prev) => !prev)}
+                  aria-expanded={compactMoreOpen}
+                  aria-haspopup="menu"
+                >
+                  More
+                </button>
+                {compactMoreOpen ? (
+                  <div className="nav-more-menu panel absolute right-0 top-[calc(100%+0.45rem)] z-30 min-w-[180px] p-2">
+                    <p className="px-2 pb-1 text-[0.64rem] uppercase tracking-[0.12em] text-[var(--ink-soft)]">
+                      Navigate
+                    </p>
+                    {compactMore.map((item) => {
+                      const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                      return (
+                        <Link
+                          key={`compact-more-${item.href}`}
+                          href={item.href}
+                          className={`${active ? "tab-active" : "tab-idle"} block w-full text-left`}
+                        >
+                          {item.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </nav>
+
+            <nav className="mt-4 hidden grid-cols-2 gap-2 min-[480px]:grid sm:grid-cols-3 lg:flex lg:flex-wrap 2xl:hidden">
               {NAV.map((item) => {
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
