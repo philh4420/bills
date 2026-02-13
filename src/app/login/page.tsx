@@ -17,11 +17,13 @@ export default function LoginPage() {
   }, [loading, ownerLoading, user, isOwner, router]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-4 py-10 md:px-6">
-      <div className="grid w-full gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1400px] items-center px-4 py-8 md:px-6 lg:px-8">
+      <div className="grid w-full gap-4 xl:grid-cols-[1.25fr_0.85fr]">
         <section className="panel p-8 md:p-10">
           <p className="text-[0.68rem] uppercase tracking-[0.24em] text-[var(--ink-soft)]">Owner Access</p>
-          <h1 className="mt-3 text-3xl font-semibold text-[var(--ink-main)] md:text-4xl">Secure finance workspace</h1>
+          <h1 className="mt-3 text-3xl font-semibold text-[var(--ink-main)] md:text-4xl">
+            Secure finance workspace
+          </h1>
           <p className="mt-4 max-w-xl text-sm leading-relaxed text-[var(--ink-soft)] md:text-base">
             Access is restricted to the configured owner account set by <code>OWNER_UID</code> or{" "}
             <code>OWNER_GOOGLE_EMAIL</code>. Once signed in, you can manage imports, monthly payments, cards, bills,
@@ -29,18 +31,18 @@ export default function LoginPage() {
           </p>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-[var(--ring)] bg-white/70 px-4 py-3">
+            <div className="rounded-2xl border border-[var(--ring)] bg-white/74 px-4 py-3">
               <p className="label">Data backend</p>
               <p className="mt-2 text-sm text-[var(--ink-main)]">Firestore + typed APIs</p>
             </div>
-            <div className="rounded-xl border border-[var(--ring)] bg-white/70 px-4 py-3">
+            <div className="rounded-2xl border border-[var(--ring)] bg-white/74 px-4 py-3">
               <p className="label">Formula behavior</p>
               <p className="mt-2 text-sm text-[var(--ink-main)]">Workbook parity retained</p>
             </div>
           </div>
         </section>
 
-        <section className="panel p-8">
+        <section className="panel p-8 md:p-9">
           <p className="label">Sign in</p>
           <h2 className="mt-2 text-2xl font-semibold">Google authentication</h2>
           <button

@@ -1,6 +1,6 @@
 import { getDefaultSpendingAccountId } from "@/lib/bank/accounts";
 import { normalizeCurrency } from "@/lib/util/numbers";
-import { BankAccountProjection, MonthSnapshot } from "@/types";
+import { BankAccountProjection } from "@/types";
 
 export interface ScenarioInput {
   month: string;
@@ -63,7 +63,16 @@ function normalizeInput(input: ScenarioInput): ScenarioInput {
 
 export function evaluateScenario(params: {
   selectedMonth: string;
-  snapshot: MonthSnapshot | null;
+  snapshot:
+    | {
+        incomeTotal: number;
+        cardSpendTotal: number;
+        cardBalanceTotal: number;
+        moneyLeft: number;
+        moneyInBank: number;
+        loanedOutOutstandingTotal: number;
+      }
+    | null;
   accountProjection?: {
     entries: BankAccountProjection[];
   } | null;

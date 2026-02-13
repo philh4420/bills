@@ -14,6 +14,7 @@ import {
 } from "@/lib/alerts/settings";
 import { authedRequest, formatApiClientError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/client";
+import { evaluateScenario } from "@/lib/scenario/engine";
 import { formatGBP, formatMonthKeyUK } from "@/lib/util/format";
 
 interface TimelineEvent {
@@ -846,6 +847,28 @@ export default function DashboardPage() {
       setScenarioResult(response.scenario);
       setScenarioMessage("Scenario calculated. Live data not changed.");
     } catch (requestError) {
+      const isLikelyOffline =
+        (typeof navigator !== "undefined" && !navigator.onLine) ||
+        (requestError instanceof Error &&
+          requestError.message.toLowerCase().includes("fetch"));
+      if (isLikelyOffline && data?.snapshot) {
+        const localScenario = evaluateScenario({
+          selectedMonth,
+          snapshot: data.snapshot,
+          accountProjection: data.bankAccountProjection || null,
+          input: {
+            month: selectedMonth,
+            extraIncome,
+            extraExpenses,
+            extraCardPayments,
+            accountDeltas: {},
+            note: scenarioDraft.note.trim() || undefined
+          }
+        });
+        setScenarioResult(localScenario);
+        setScenarioMessage("Offline estimate calculated locally. Live data not changed.");
+        return;
+      }
       setScenarioMessage(formatApiClientError(requestError, "Failed to run scenario."));
     } finally {
       setScenarioBusy(false);

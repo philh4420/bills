@@ -1,3 +1,13 @@
+"use client";
+
+import {
+  canQueueOfflineWrite,
+  enqueueOfflineWrite,
+  isOfflineQueueNetworkError,
+  startOfflineSync,
+  triggerOfflineReplay
+} from "@/lib/offline/queue";
+
 export class ApiClientError extends Error {
   status: number;
   details?: unknown;
@@ -59,6 +69,10 @@ function lockedMonthFromError(error: ApiClientError): string | null {
 
 export function formatApiClientError(error: unknown, fallback: string): string {
   if (error instanceof ApiClientError) {
+    if (error.status === 202) {
+      return error.message || "Saved offline. Will sync automatically when back online.";
+    }
+
     if (error.status === 401) {
       return "Your session has expired. Sign in again.";
     }
@@ -95,21 +109,53 @@ export async function authedRequest<T>(
   path: string,
   init?: RequestInit
 ): Promise<T> {
+  if (typeof window !== "undefined") {
+    startOfflineSync();
+  }
+
   const token = await getIdToken();
   if (!token) {
     throw new ApiClientError(401, "Not authenticated");
   }
 
   const isFormData = init?.body instanceof FormData;
+  const method = (init?.method || "GET").toUpperCase();
+  const shouldQueue = typeof window !== "undefined" && canQueueOfflineWrite(path, method, isFormData);
 
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(isFormData ? {} : { "content-type": "application/json" }),
-      ...(init?.headers || {})
+  if (shouldQueue && typeof navigator !== "undefined" && !navigator.onLine) {
+    const queued = enqueueOfflineWrite({
+      method,
+      path,
+      bodyText: typeof init?.body === "string" ? init.body : undefined,
+      contentType:
+        !isFormData && init?.body ? "application/json" : undefined
+    });
+    throw new ApiClientError(202, `Saved offline (queue ${queued.id}). Sync will run automatically.`);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(isFormData ? {} : { "content-type": "application/json" }),
+        ...(init?.headers || {})
+      }
+    });
+  } catch (error) {
+    if (shouldQueue && isOfflineQueueNetworkError(error)) {
+      const queued = enqueueOfflineWrite({
+        method,
+        path,
+        bodyText: typeof init?.body === "string" ? init.body : undefined,
+        contentType:
+          !isFormData && init?.body ? "application/json" : undefined
+      });
+      throw new ApiClientError(202, `Saved offline (queue ${queued.id}). Sync will run automatically.`);
     }
-  });
+    throw error;
+  }
 
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
@@ -136,6 +182,10 @@ export async function authedRequest<T>(
         : `Request failed with status ${response.status}`;
 
     throw new ApiClientError(response.status, message, details);
+  }
+
+  if (shouldQueue && typeof window !== "undefined") {
+    void triggerOfflineReplay();
   }
 
   return body as T;
